@@ -1,1 +1,17 @@
 .env
+__pycache__/
+*.py[cod]
+.env
+.venv/
+.mypy_cache/
+
+# Node / React Native
+node_modules/
+android/.gradle/
+ios/build/
+*.keystore
+
+# System / IDE
+.vscode/
+.idea/
+.DS_Store
