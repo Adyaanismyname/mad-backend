@@ -1,7 +1,6 @@
 from sqlalchemy.orm import declarative_base
 
-
-Base = declarative_base() # any model would inherit this class
+Base = declarative_base()  # any model would inherit this class
 
 
 

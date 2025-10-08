@@ -1,4 +1,9 @@
 from fastapi import APIRouter
-# the master router
+from api.endpoints import user
+
+router = APIRouter()
+
+router.include_router(user.router, prefix="/users", tags=["users"])
+
 
 
