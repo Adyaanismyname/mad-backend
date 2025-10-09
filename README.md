@@ -122,6 +122,67 @@ curl -X POST http://localhost:8000/users \
 curl -X GET 'http://localhost:8000/entities?limit=10&page=1'
 ```
 
+## Database Migrations with Alembic
+
+This project uses Alembic for database schema migrations. Alembic tracks changes to your models and applies them to your database.
+
+### Understanding Alembic Commands
+
+**Step 1: `alembic revision --autogenerate -m "message"`**
+
+Purpose: Create a new migration file based on changes to your SQLAlchemy models.
+
+What happens:
+- Alembic compares your current models with the database schema
+- It generates a migration script describing the differences
+- The script is saved in `alembic/versions/` with a unique revision ID
+- Nothing is applied to the database yet
+
+🧠 Think of it as "creating a plan" for database changes.
+
+**Step 2: `alembic upgrade head`**
+
+Purpose: Actually apply all new migrations to your database.
+
+What happens:
+- Alembic runs all unapplied migration scripts in order
+- It updates your database schema
+- It records the last migration ID in the `alembic_version` table
+
+🧠 Think of it as "executing the plan".
+
+### Full Workflow Example
+
+When you change your models (like adding a new column):
+
+```bash
+# 1. Create the migration file
+python -m alembic revision --autogenerate -m "Added new column to User"
+
+# 2. Apply the migration to the database
+python -m alembic upgrade head
+```
+
+Alembic will:
+1. Create a new migration file describing the change
+2. Apply it to your actual Postgres database
+
+### Common Alembic Commands
+
+```bash
+# Check current database version
+python -m alembic current
+
+# View migration history
+python -m alembic history
+
+# Downgrade to previous version
+python -m alembic downgrade -1
+
+# Downgrade to specific revision
+python -m alembic downgrade <revision_id>
+```
+
 ## Running and testing locally
 
 - Start the backend (example — adapt to your project's entrypoint):
