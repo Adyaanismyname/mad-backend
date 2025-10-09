@@ -3,6 +3,91 @@
 
 This repository contains the backend for the Gym-App project. This README documents how the API expects requests and responds, the standard response shape, examples, and simple testing steps.
 
+## Prerequisites
+
+- Python 3.12+
+- Docker & Docker Compose
+- PostgreSQL (via Docker)
+
+## Installation & Setup
+
+### 1. Install Dependencies
+
+Install all required Python packages from the `requirements.txt` file:
+
+```bash
+pip install -r requirements.txt
+```
+
+**Key dependencies for this project:**
+- `fastapi` - Modern web framework for building APIs
+- `uvicorn` - ASGI server for running FastAPI
+- `sqlalchemy` - SQL toolkit and ORM
+- `psycopg2-binary` - PostgreSQL adapter
+- `alembic` - Database migration tool
+- `pydantic` & `pydantic-settings` - Data validation and settings management
+- `email-validator` - Email validation for Pydantic
+- `python-dotenv` - Environment variable management
+
+### 2. Start PostgreSQL Database (Docker)
+
+Start the PostgreSQL container using Docker Compose:
+
+```bash
+# Start the database in detached mode
+docker-compose up -d
+
+# View logs
+docker-compose logs -f db
+
+# Stop the database
+docker-compose down
+
+# Stop and remove volumes (deletes all data)
+docker-compose down -v
+```
+
+The database will be available at:
+- Host: `localhost`
+- Port: `5432`
+- Database: `mydb`
+- Username: `admin`
+- Password: `admin123`
+
+### 3. Configure Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+DATABASE_URL=postgresql+psycopg2://admin:admin123@localhost:5432/mydb
+```
+
+### 4. Run Database Migrations
+
+```bash
+# Create initial migration
+python -m alembic revision --autogenerate -m "Initial database schema"
+
+# Apply migrations to database
+python -m alembic upgrade head
+```
+
+### 5. Start the Backend Server
+
+```bash
+# Development mode with auto-reload
+uvicorn main:app --reload
+
+# Production mode
+uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Custom host and port
+uvicorn main:app --host 127.0.0.1 --port 8080 --reload
+```
+
+The API will be available at:
+- API: `http://localhost:8000`
+
 ## API response rules
 
 All API endpoints in this project follow a consistent response format. This makes it easy for clients to parse responses and handle errors uniformly.
