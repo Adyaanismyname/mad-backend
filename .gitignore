@@ -10,6 +10,7 @@ node_modules/
 android/.gradle/
 ios/build/
 *.keystore
+docker-compose.yml
 
 # System / IDE
 .vscode/
