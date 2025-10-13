@@ -1,9 +1,11 @@
-from sqlalchemy import Column, String, DateTime, Date, Boolean, DECIMAL, ForeignKey, Text, Enum, text
+from sqlalchemy import DateTime, ForeignKey, Enum, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from db.base import Base
 import enum
+from datetime import datetime
+import uuid
 
 class RelationshipStatus(enum.Enum):
     PENDING = "pending"
@@ -15,18 +17,18 @@ class CoachClientRelationship(Base):
     __tablename__ = "coach_client_relationships"
 
     # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
     
     # Foreign Keys
-    coach_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    client_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    coach_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    client_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     
     # Relationship Fields
-    status = Column(Enum(RelationshipStatus, name="relationship_status_enum"), nullable=False, default=RelationshipStatus.PENDING)
+    status: Mapped[RelationshipStatus] = mapped_column(Enum(RelationshipStatus, name="relationship_status_enum"), default=RelationshipStatus.PENDING)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     coach = relationship("User", foreign_keys=[coach_user_id], back_populates="coached_relationships")

@@ -1,9 +1,12 @@
-from sqlalchemy import Column, String, DateTime, Enum, text, Boolean
+from sqlalchemy import String, DateTime, Enum, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from db.base import Base
 import enum
+from typing import Optional
+from datetime import datetime
+import uuid
 
 class UserRole(enum.Enum):
     COACH = "coach"
@@ -14,20 +17,20 @@ class User(Base):
     __tablename__ = "users"
 
     # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
     
     # Core Fields
-    email = Column(String, unique=True, index=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-    role = Column(Enum(UserRole, name="user_role_enum"), nullable=False, default=UserRole.CLIENT)
-    full_name = Column(String, nullable=False)
-    phone_number = Column(String, nullable=True)
-    profile_picture_url = Column(String, nullable=True)
+    email: Mapped[str] = mapped_column(String, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role_enum"), default=UserRole.CLIENT)
+    full_name: Mapped[str] = mapped_column(String)
+    phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    profile_picture_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # --- Authentication Relationships ---
     password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
