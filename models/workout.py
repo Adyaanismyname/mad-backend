@@ -1,29 +1,32 @@
-from sqlalchemy import Column, String, DateTime, Integer, Boolean, ForeignKey, Text, text
+from sqlalchemy import String, DateTime, Integer, Boolean, ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from db.base import Base
+from typing import Optional
+from datetime import datetime
+import uuid
 
 class Workout(Base):
     __tablename__ = "workouts"
 
     # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
     
     # Foreign Key
-    coach_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    coach_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     
     # Workout Fields
-    name = Column(String, nullable=False)
-    description = Column(Text, nullable=True)
-    difficulty_level = Column(String, nullable=True)
-    estimated_duration_minutes = Column(Integer, nullable=True)
-    category = Column(String, nullable=True)
-    is_template = Column(Boolean, default=False, nullable=False)
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    difficulty_level: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    estimated_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_template: Mapped[bool] = mapped_column(Boolean, default=False)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     coach = relationship("User", back_populates="created_workouts")

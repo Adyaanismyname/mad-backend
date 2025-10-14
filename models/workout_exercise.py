@@ -1,29 +1,32 @@
-from sqlalchemy import Column, DateTime, Integer, ForeignKey, Text, text
+from sqlalchemy import DateTime, Integer, ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from db.base import Base
+from typing import Optional
+from datetime import datetime
+import uuid
 
 class WorkoutExercise(Base):
     __tablename__ = "workout_exercises"
 
     # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
     
     # Foreign Keys
-    workout_id = Column(UUID(as_uuid=True), ForeignKey("workouts.id"), nullable=False)
-    exercise_id = Column(UUID(as_uuid=True), ForeignKey("exercises.id"), nullable=False)
+    workout_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workouts.id"))
+    exercise_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("exercises.id"))
     
     # Exercise Configuration
-    order_index = Column(Integer, nullable=False)
-    sets = Column(Integer, nullable=True)
-    reps = Column(Integer, nullable=True)
-    duration_seconds = Column(Integer, nullable=True)
-    rest_seconds = Column(Integer, nullable=True)
-    notes = Column(Text, nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer)
+    sets: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reps: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rest_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships
     workout = relationship("Workout", back_populates="workout_exercises")

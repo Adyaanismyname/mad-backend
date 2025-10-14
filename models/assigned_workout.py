@@ -1,9 +1,12 @@
-from sqlalchemy import Column, DateTime, Date, DECIMAL, ForeignKey, Text, Enum, text
+from sqlalchemy import DateTime, Date, ForeignKey, Text, Enum, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from db.base import Base
 import enum
+from typing import Optional
+from datetime import datetime, date
+import uuid
 
 class AssignmentStatus(enum.Enum):
     ASSIGNED = "assigned"
@@ -15,24 +18,24 @@ class AssignedWorkout(Base):
     __tablename__ = "assigned_workouts"
 
     # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
     
     # Foreign Keys
-    workout_id = Column(UUID(as_uuid=True), ForeignKey("workouts.id"), nullable=False)
-    coach_client_relationship_id = Column(UUID(as_uuid=True), ForeignKey("coach_client_relationships.id"), nullable=False)
-    coach_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    client_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    workout_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workouts.id"))
+    coach_client_relationship_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("coach_client_relationships.id"))
+    coach_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    client_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     
     # Assignment Fields
-    assigned_date = Column(Date, nullable=False)
-    due_date = Column(Date, nullable=True)
-    status = Column(Enum(AssignmentStatus, name="assignment_status_enum"), nullable=False, default=AssignmentStatus.ASSIGNED)
-    coach_notes = Column(Text, nullable=True)
-    client_notes = Column(Text, nullable=True)
+    assigned_date: Mapped[date] = mapped_column(Date)
+    due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[AssignmentStatus] = mapped_column(Enum(AssignmentStatus, name="assignment_status_enum"), default=AssignmentStatus.ASSIGNED)
+    coach_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    client_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     workout = relationship("Workout", back_populates="assigned_workouts")

@@ -1,28 +1,31 @@
-from sqlalchemy import Column, String, DateTime, Text, text
+from sqlalchemy import String, DateTime, Text, text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from db.base import Base
+from typing import Optional, List
+from datetime import datetime
+import uuid
 
 class Exercise(Base):
     __tablename__ = "exercises"
 
     # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
     
     # Exercise Fields
-    name = Column(String, nullable=False)
-    description = Column(Text, nullable=True)
-    category = Column(String, nullable=True)
-    muscle_group = Column(ARRAY(Text), nullable=True)
-    instructions = Column(Text, nullable=True)
-    demo_video_url = Column(Text, nullable=True)
-    difficulty = Column(String, nullable=True)
-    equipment_needed = Column(ARRAY(Text), nullable=True)
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    muscle_group: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    demo_video_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    difficulty: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    equipment_needed: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     workout_exercises = relationship("WorkoutExercise", back_populates="exercise", cascade="all, delete-orphan")

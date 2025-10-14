@@ -1,27 +1,30 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Text, text
+from sqlalchemy import DateTime, ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from db.base import Base
+from typing import Optional, Any
+from datetime import datetime
+import uuid
 
 class Feedback(Base):
     __tablename__ = "feedback"
 
     # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"), index=True)
     
     # Foreign Keys
-    media_id = Column(UUID(as_uuid=True), ForeignKey("media_uploads.id"), nullable=False)
-    coach_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    parent_feedback_id = Column(UUID(as_uuid=True), ForeignKey("feedback.id"), nullable=True)  # For threaded feedback
+    media_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("media_uploads.id"))
+    coach_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    parent_feedback_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("feedback.id"), nullable=True)  # For threaded feedback
     
     # Feedback Fields
-    content = Column(Text, nullable=False)
-    annotation_data = Column(JSONB, nullable=True)  # For storing timestamps, coordinates, etc.
+    content: Mapped[str] = mapped_column(Text)
+    annotation_data: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)  # For storing timestamps, coordinates, etc.
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     media = relationship("MediaUpload", back_populates="feedback")
