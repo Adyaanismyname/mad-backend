@@ -181,15 +181,30 @@ Notes:
 
 ## Error handling best practices
 
-- Use clear, actionable `message` strings. Avoid internal stack traces or raw exceptions in `message`.
-- Put any machine-readable error details inside `data`. For example:
+All endpoints follow a consistent error handling pattern using try-catch blocks with specific exception handling:
 
-	{
-		"data": { "field_errors": { "email": "invalid format" } },
-		"message": "Validation failed"
-	}
+```python
+try:
+    # Main endpoint logic here
+    return {"data": result, "message": "Success message"}
+except OperationalError as e:
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Database connection failed"
+    )
+except Exception as e:
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"An error occurred: {str(e)}"
+    )
+```
 
-- Use appropriate HTTP status codes: 200/201 for success, 400 for bad requests, 401 for unauthorized, 403 for forbidden, 404 for not found, 422 for validation errors, 500 for server errors.
+**Error Types:**
+- **503 Service Unavailable**: Database connection issues (`OperationalError`)
+- **500 Internal Server Error**: Unexpected errors with descriptive message
+- **401 Unauthorized**: Invalid or missing authentication token
+- **403 Forbidden**: Insufficient privileges (admin endpoints)
+- **400 Bad Request**: Invalid request data or validation errors
 
 ## Curl examples (quick testing)
 

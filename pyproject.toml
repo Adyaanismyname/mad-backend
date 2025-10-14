@@ -33,4 +33,5 @@ dependencies = [
     "typing_extensions==4.15.0",
     "uvicorn==0.37.0",
     "wheel==0.45.1",
+    "python-jose[cryptography]>=3.5.0",
 ]
