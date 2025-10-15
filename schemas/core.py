@@ -17,12 +17,27 @@ class APIResponse(BaseModel, Generic[DataType]):
     data: DataType
     message: str
 
-# Convenience alias for responses with any data type
 class StandardResponse(APIResponse[Any]):
-    """Standard response with flexible data type"""
+    """
+    Standard API response with flexible data type.
+    
+    Use this for endpoints that return varying data types.
+    Accepts lists, objects, empty dicts, etc.
+    
+    Example:
+    return StandardResponse(data=[users], message="Users retrieved")
+    return StandardResponse(data={}, message="No data found")
+    """
     pass
 
-# Common response for empty data
 class EmptyDataResponse(APIResponse[dict]):
-    """Response with empty data object"""
+    """
+    API response specifically for empty data scenarios.
+    
+    Use this when you know the response will always have empty data {}.
+    Provides better type hints than StandardResponse for empty responses.
+    
+    Example:
+    return EmptyDataResponse(data={}, message="Operation completed")
+    """
     pass
