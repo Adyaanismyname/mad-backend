@@ -4,10 +4,10 @@ class UserLogin(BaseModel):
     """
     User login request model.
     
-    Used for authenticating users with username and password.
-    Endpoint: POST /auth/login
+    Used for authenticating users with email and password.
+    Endpoint: POST /users/login
     """
-    username: str
+    email: EmailStr
     password: str
     
 
@@ -48,4 +48,21 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SignupRequest(BaseModel):
+    """
+    Request model for signing up a new user.
+    """
+    email: EmailStr
+    password: str
+    full_name: str | None = None
+
+
+class VerifyOTP(BaseModel):
+    """
+    Model for verifying an OTP/token sent to user's email.
+    """
+    email: EmailStr
+    token: str
 
