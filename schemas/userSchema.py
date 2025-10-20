@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 class UserLogin(BaseModel):
     """
@@ -42,10 +42,9 @@ class UserResponse(BaseModel):
     Returns public user information (excludes sensitive data like password).
     Used in API responses for user-related endpoints.
     """
+    model_config = ConfigDict(from_attributes=True)
+    
     id: int
     username: str
     email: EmailStr
-
-    class Config:
-        from_attributes = True
 

@@ -34,4 +34,12 @@ dependencies = [
     "uvicorn==0.37.0",
     "wheel==0.45.1",
     "python-jose[cryptography]>=3.5.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=7.0.0",
+    "pytest-mock>=3.15.1",
+    "httpx>=0.28.1",
+    "faker>=37.11.0",
+    "factory-boy>=3.3.3",
+    "pytest-env>=1.2.0",
 ]
