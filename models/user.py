@@ -7,6 +7,9 @@ import enum
 from typing import Optional
 from datetime import datetime
 import uuid
+import os
+import hashlib
+import binascii
 
 class UserRole(enum.Enum):
     COACH = "coach"
@@ -86,4 +89,31 @@ class User(Base):
     
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', role='{self.role.value}', full_name='{self.full_name}')>"
+
+    # --- Password helpers ---
+    def set_password(self, raw_password: str, iterations: int = 100_000) -> None:
+        """
+        Hash and store the user's password using PBKDF2-HMAC-SHA256.
+        Stored format: iterations$salt_hex$hash_hex
+        """
+        salt = os.urandom(16)
+        dk = hashlib.pbkdf2_hmac('sha256', raw_password.encode('utf-8'), salt, iterations)
+        self.password_hash = f"{iterations}${binascii.hexlify(salt).decode()}${binascii.hexlify(dk).decode()}"
+
+    def verify_password(self, raw_password: str) -> bool:
+        """
+        Verify a plaintext password against the stored password_hash.
+        Returns True if it matches, False otherwise.
+        """
+        try:
+            parts = self.password_hash.split('$')
+            if len(parts) != 3:
+                return False
+            iterations = int(parts[0])
+            salt = binascii.unhexlify(parts[1])
+            stored_hash = parts[2]
+            dk = hashlib.pbkdf2_hmac('sha256', raw_password.encode('utf-8'), salt, iterations)
+            return binascii.hexlify(dk).decode() == stored_hash
+        except Exception:
+            return False
 

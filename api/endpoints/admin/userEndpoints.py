@@ -3,12 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import select
 from db.session import get_db
-from schemas.userSchema import UserLogin, UserResponse, UserTokenData, UserFetch
-from core.auth import verify_admin_token, create_access_token
+from schemas.userSchema import UserResponse, UserFetch
+from core.auth import verify_admin_token
 from models.user import User
 from schemas.core import StandardResponse
-
-
 
 router = APIRouter()
 
@@ -48,8 +46,9 @@ async def get_user(user_id: int, admin: dict = Depends(verify_admin_token), db: 
     Errors: 401 (unauthorized), 403 (forbidden), 404 (user not found), 503 (db error), 500 (server error)
     """
     try:
-        result = await db.execute(select(User).where(User.id == user_id))
+        result = await db.execute(select(User).filter(User.id == user_id))
         user = result.scalar_one_or_none()
+        
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -70,40 +69,3 @@ async def get_user(user_id: int, admin: dict = Depends(verify_admin_token), db: 
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"
         )
-
-
-
-@router.post("/login" , response_model=StandardResponse)
-async def login_user(user_credentials : UserLogin, db : AsyncSession = Depends(get_db)):
-    """
-    Login a user and return a JWT token.
-    
-    Args:
-        user_credentials (UserLogin): The user's login credentials
-        db (AsyncSession): The database session (injected)
-    Returns:
-        StandardResponse: The response containing the JWT token and message
-    Errors:
-        401 Unauthorized: If credentials are invalid        
-        500 Internal Server Error: If an unexpected error occurs
-    """
-    try:
-        result = await db.execute(select(User).where(User.username == user_credentials.username))
-        user = result.scalar_one_or_none()
-        if not user or not user.verify_password(user_credentials.password):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password"
-            )  
-        # Create JWT token
-        token_data = UserTokenData(username=user.username, user_id=user.id)
-        access_token = create_access_token(data=token_data.model_dump())
-
-        return StandardResponse(data={"access_token": access_token}, message="Login successful")
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred: {str(e)}"
-        )
-
-

@@ -60,7 +60,21 @@ Create a `.env` file in the project root:
 
 ```env
 DATABASE_URL=postgresql+psycopg2://admin:admin123@localhost:5432/mydb
+SECRET_KEY=your_secret_key_here
+
+# Email/SMTP Configuration (Required for signup OTP)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_FROM=your_email@gmail.com
 ```
+
+**SMTP Setup Options:**
+- **Gmail**: Use `smtp.gmail.com:587` with an App Password
+- **SendGrid**: Use `smtp.sendgrid.net:587` with API key as password
+- **Mailgun**: Use `smtp.mailgun.org:587` with domain credentials
+- **Mailtrap** (testing): Use `smtp.mailtrap.io:2525` with test credentials
 
 ### 4. Run Database Migrations
 
