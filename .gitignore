@@ -4,6 +4,7 @@ __pycache__/
 .env
 .venv/
 .mypy_cache/
+Python-3.14.0/
 
 # Node / React Native
 node_modules/
