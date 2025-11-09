@@ -1,33 +1,28 @@
-from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, status, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from db.session import get_db
 from schemas.workoutSchema import (
-    WorkoutCreate, WorkoutUpdate, WorkoutResponse, WorkoutSummaryResponse,
-    WorkoutExerciseCreate, WorkoutExerciseUpdate, WorkoutExerciseResponse,
-    AssignedWorkoutCreate, AssignedWorkoutUpdate, AssignedWorkoutResponse,
-    AssignedWorkoutSummaryResponse
+    WorkoutExerciseCreate, WorkoutExerciseUpdate, WorkoutExerciseResponse
 )
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
 from models.workout import Workout
 from models.workout_exercise import WorkoutExercise
-from models.assigned_workout import AssignedWorkout, AssignmentStatus
-from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
-from models.user import User, UserRole
-from typing import Optional
 from uuid import UUID
-from api.endpoints.helper_methods import verify_coach_role, verify_coach_client_relationship
+from api.endpoints.helper_methods import verify_coach_role
 
 router = APIRouter()
 
 
-@router.post("/workouts/{workout_id}/exercises", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/{workout_id}/exercises", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
 async def add_exercise_to_workout(
     workout_id: UUID,
     exercise_data: WorkoutExerciseCreate,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Add an exercise to an existing workout (Coach only).
@@ -37,9 +32,10 @@ async def add_exercise_to_workout(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
+        await verify_coach_role(coach_user_id, db)
         
-        workout = db.query(Workout).filter(Workout.id == workout_id).first()
+        result = await db.execute(select(Workout).filter(Workout.id == workout_id))
+        workout = result.scalar_one_or_none()
         
         if not workout:
             raise HTTPException(
@@ -65,13 +61,16 @@ async def add_exercise_to_workout(
         )
         
         db.add(workout_exercise)
-        db.commit()
-        db.refresh(workout_exercise)
+        await db.commit()
+        await db.refresh(workout_exercise)
         
         # Fetch with exercise details
-        workout_exercise = db.query(WorkoutExercise).options(
-            joinedload(WorkoutExercise.exercise)
-        ).filter(WorkoutExercise.id == workout_exercise.id).first()
+        result = await db.execute(
+            select(WorkoutExercise).options(
+                joinedload(WorkoutExercise.exercise)
+            ).filter(WorkoutExercise.id == workout_exercise.id)
+        )
+        workout_exercise = result.scalar_one_or_none()
         
         response = WorkoutExerciseResponse.model_validate(workout_exercise)
         return StandardResponse(
@@ -82,26 +81,26 @@ async def add_exercise_to_workout(
     except HTTPException:
         raise
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid exercise ID"
         )
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"
         )
 
 
-@router.put("/workouts/{workout_id}/exercises/{exercise_id}", response_model=StandardResponse)
+@router.put("/{workout_id}/exercises/{exercise_id}", response_model=StandardResponse)
 async def update_workout_exercise(
     workout_id: UUID,
     exercise_id: UUID,
     exercise_data: WorkoutExerciseUpdate,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Update exercise configuration in a workout (Coach only).
@@ -111,9 +110,10 @@ async def update_workout_exercise(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
+        await verify_coach_role(coach_user_id, db)
         
-        workout = db.query(Workout).filter(Workout.id == workout_id).first()
+        result = await db.execute(select(Workout).filter(Workout.id == workout_id))
+        workout = result.scalar_one_or_none()
         
         if not workout or workout.coach_id != coach_user_id:
             raise HTTPException(
@@ -121,10 +121,13 @@ async def update_workout_exercise(
                 detail="Not authorized to modify this workout"
             )
         
-        workout_exercise = db.query(WorkoutExercise).filter(
-            WorkoutExercise.id == exercise_id,
-            WorkoutExercise.workout_id == workout_id
-        ).first()
+        result = await db.execute(
+            select(WorkoutExercise).filter(
+                WorkoutExercise.id == exercise_id,
+                WorkoutExercise.workout_id == workout_id
+            )
+        )
+        workout_exercise = result.scalar_one_or_none()
         
         if not workout_exercise:
             raise HTTPException(
@@ -137,13 +140,16 @@ async def update_workout_exercise(
         for field, value in update_data.items():
             setattr(workout_exercise, field, value)
         
-        db.commit()
-        db.refresh(workout_exercise)
+        await db.commit()
+        await db.refresh(workout_exercise)
         
         # Fetch with exercise details
-        workout_exercise = db.query(WorkoutExercise).options(
-            joinedload(WorkoutExercise.exercise)
-        ).filter(WorkoutExercise.id == exercise_id).first()
+        result = await db.execute(
+            select(WorkoutExercise).options(
+                joinedload(WorkoutExercise.exercise)
+            ).filter(WorkoutExercise.id == exercise_id)
+        )
+        workout_exercise = result.scalar_one_or_none()
         
         response = WorkoutExerciseResponse.model_validate(workout_exercise)
         return StandardResponse(
@@ -154,19 +160,19 @@ async def update_workout_exercise(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"
         )
 
 
-@router.delete("/workouts/{workout_id}/exercises/{exercise_id}", response_model=StandardResponse)
+@router.delete("/{workout_id}/exercises/{exercise_id}", response_model=StandardResponse)
 async def remove_exercise_from_workout(
     workout_id: UUID,
     exercise_id: UUID,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Remove an exercise from a workout (Coach only).
@@ -176,9 +182,10 @@ async def remove_exercise_from_workout(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
+        await verify_coach_role(coach_user_id, db)
         
-        workout = db.query(Workout).filter(Workout.id == workout_id).first()
+        result = await db.execute(select(Workout).filter(Workout.id == workout_id))
+        workout = result.scalar_one_or_none()
         
         if not workout or workout.coach_id != coach_user_id:
             raise HTTPException(
@@ -186,10 +193,13 @@ async def remove_exercise_from_workout(
                 detail="Not authorized to modify this workout"
             )
         
-        workout_exercise = db.query(WorkoutExercise).filter(
-            WorkoutExercise.id == exercise_id,
-            WorkoutExercise.workout_id == workout_id
-        ).first()
+        result = await db.execute(
+            select(WorkoutExercise).filter(
+                WorkoutExercise.id == exercise_id,
+                WorkoutExercise.workout_id == workout_id
+            )
+        )
+        workout_exercise = result.scalar_one_or_none()
         
         if not workout_exercise:
             raise HTTPException(
@@ -197,8 +207,8 @@ async def remove_exercise_from_workout(
                 detail="Exercise not found in this workout"
             )
         
-        db.delete(workout_exercise)
-        db.commit()
+        await db.delete(workout_exercise)
+        await db.commit()
         
         return StandardResponse(
             data={},
@@ -208,7 +218,7 @@ async def remove_exercise_from_workout(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"

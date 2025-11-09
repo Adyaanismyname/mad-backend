@@ -3,8 +3,9 @@ from core.config import settings
 from typing import AsyncGenerator
 
 # Create async engine with asyncpg driver
+print(settings.DATABASE_URL)
 engine = create_async_engine(
-    settings.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://"),
+    settings.DATABASE_URL,
     pool_pre_ping=True,      # Verify connections before using them (crucial for remote DBs)
     pool_size=2,             # Smaller pool for free tier databases
     max_overflow=3,          # Limited overflow for free tier

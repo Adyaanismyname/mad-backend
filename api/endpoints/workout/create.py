@@ -1,23 +1,16 @@
-from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, status, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from db.session import get_db
-from schemas.workoutSchema import (
-    WorkoutCreate, WorkoutUpdate, WorkoutResponse, WorkoutSummaryResponse,
-    WorkoutExerciseCreate, WorkoutExerciseUpdate, WorkoutExerciseResponse,
-    AssignedWorkoutCreate, AssignedWorkoutUpdate, AssignedWorkoutResponse,
-    AssignedWorkoutSummaryResponse
-)
+from schemas.workoutSchema import WorkoutCreate, WorkoutResponse
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
 from models.workout import Workout
 from models.workout_exercise import WorkoutExercise
-from models.assigned_workout import AssignedWorkout, AssignmentStatus
-from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
-from models.user import User, UserRole
-from typing import Optional
 from uuid import UUID
-from api.endpoints.helper_methods import verify_coach_role, verify_coach_client_relationship
+from api.endpoints.helper_methods import verify_coach_role
 
 router = APIRouter()
 
@@ -26,7 +19,7 @@ router = APIRouter()
 async def create_workout(
     workout_data: WorkoutCreate,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     FR-4.1: Create a new workout routine (Coach only).
@@ -38,7 +31,7 @@ async def create_workout(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
+        await verify_coach_role(coach_user_id, db)
         
         # Create the workout
         new_workout = Workout(
@@ -52,7 +45,7 @@ async def create_workout(
         )
         
         db.add(new_workout)
-        db.flush()  # Get the workout ID
+        await db.flush()  # Get the workout ID
         
         # Add exercises to the workout
         if workout_data.exercises:
@@ -69,13 +62,16 @@ async def create_workout(
                 )
                 db.add(workout_exercise)
         
-        db.commit()
-        db.refresh(new_workout)
+        await db.commit()
+        await db.refresh(new_workout)
         
         # Fetch with relationships
-        workout = db.query(Workout).options(
-            joinedload(Workout.workout_exercises).joinedload(WorkoutExercise.exercise)
-        ).filter(Workout.id == new_workout.id).first()
+        result = await db.execute(
+            select(Workout).options(
+                joinedload(Workout.workout_exercises).joinedload(WorkoutExercise.exercise)
+            ).filter(Workout.id == new_workout.id)
+        )
+        workout = result.unique().scalar_one_or_none()
         
         workout_response = WorkoutResponse.model_validate(workout)
         return StandardResponse(
@@ -86,13 +82,13 @@ async def create_workout(
     except HTTPException:
         raise
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid exercise ID or constraint violation"
         )
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"

@@ -1,32 +1,23 @@
-from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, status, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from db.session import get_db
-from schemas.feedbackSchema import (
-    MediaUploadCreate, MediaUploadResponse,
-    FeedbackCreate, FeedbackUpdate, FeedbackResponse,
-    MediaWithFeedbackResponse
-)
-from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
-
+from schemas.feedbackSchema import MediaUploadCreate, MediaUploadResponse
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
 from models.media_upload import MediaUpload
-from models.feedback import Feedback
 from models.assigned_workout import AssignedWorkout
-from models.user import User, UserRole
-from typing import Optional
 from uuid import UUID
-from api.endpoints.helper_methods import verify_coach_role, verify_coach_client_relationship
 
-router = APIRouter()
+router = APIRouter(prefix="/media")
 
 
-@router.post("/media", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
 async def upload_media(
     media_data: MediaUploadCreate,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Upload media (video/image) for an exercise (Client only).
@@ -42,10 +33,13 @@ async def upload_media(
         
         # Verify assigned workout belongs to client if provided
         if media_data.assigned_workout_id:
-            assigned_workout = db.query(AssignedWorkout).filter(
-                AssignedWorkout.id == media_data.assigned_workout_id,
-                AssignedWorkout.client_user_id == client_user_id
-            ).first()
+            result = await db.execute(
+                select(AssignedWorkout).filter(
+                    AssignedWorkout.id == media_data.assigned_workout_id,
+                    AssignedWorkout.client_user_id == client_user_id
+                )
+            )
+            assigned_workout = result.scalar_one_or_none()
             
             if not assigned_workout:
                 raise HTTPException(
@@ -64,8 +58,8 @@ async def upload_media(
         )
         
         db.add(media_upload)
-        db.commit()
-        db.refresh(media_upload)
+        await db.commit()
+        await db.refresh(media_upload)
         
         response = MediaUploadResponse.model_validate(media_upload)
         return StandardResponse(
@@ -76,13 +70,13 @@ async def upload_media(
     except HTTPException:
         raise
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid exercise or workout ID"
         )
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"

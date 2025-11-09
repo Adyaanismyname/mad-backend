@@ -1,30 +1,16 @@
-from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
-from db.session import get_db
-from schemas.workoutSchema import (
-    WorkoutCreate, WorkoutUpdate, WorkoutResponse, WorkoutSummaryResponse,
-    WorkoutExerciseCreate, WorkoutExerciseUpdate, WorkoutExerciseResponse,
-    AssignedWorkoutCreate, AssignedWorkoutUpdate, AssignedWorkoutResponse,
-    AssignedWorkoutSummaryResponse
-)
-from schemas.core import StandardResponse
-from core.auth import verify_user_token
-from models.workout import Workout
-from models.workout_exercise import WorkoutExercise
-from models.assigned_workout import AssignedWorkout, AssignmentStatus
+from fastapi import status, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
 from models.user import User, UserRole
-from typing import Optional
 from uuid import UUID
-
-router = APIRouter()
 
 # ============= Helper Functions =============
 
-def verify_coach_role(user_id: UUID, db: Session):
+async def verify_coach_role(user_id: UUID, db: AsyncSession):
     """Verify that user has coach role."""
-    user = db.query(User).filter(User.id == user_id).first()
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -38,13 +24,16 @@ def verify_coach_role(user_id: UUID, db: Session):
     return user
 
 
-def verify_coach_client_relationship(coach_id: UUID, client_id: UUID, db: Session):
+async def verify_coach_client_relationship(coach_id: UUID, client_id: UUID, db: AsyncSession):
     """Verify active coach-client relationship."""
-    relationship = db.query(CoachClientRelationship).filter(
-        CoachClientRelationship.coach_user_id == coach_id,
-        CoachClientRelationship.client_user_id == client_id,
-        CoachClientRelationship.status == RelationshipStatus.ACTIVE
-    ).first()
+    result = await db.execute(
+        select(CoachClientRelationship).filter(
+            CoachClientRelationship.coach_user_id == coach_id,
+            CoachClientRelationship.client_user_id == client_id,
+            CoachClientRelationship.status == RelationshipStatus.ACTIVE
+        )
+    )
+    relationship = result.scalar_one_or_none()
     
     if not relationship:
         raise HTTPException(

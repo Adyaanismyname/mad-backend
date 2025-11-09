@@ -1,23 +1,18 @@
 from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+from sqlalchemy import select
 from db.session import get_db
-from schemas.workoutSchema import (
-    WorkoutCreate, WorkoutUpdate, WorkoutResponse, WorkoutSummaryResponse,
-    WorkoutExerciseCreate, WorkoutExerciseUpdate, WorkoutExerciseResponse,
-    AssignedWorkoutCreate, AssignedWorkoutUpdate, AssignedWorkoutResponse,
-    AssignedWorkoutSummaryResponse
-)
+from schemas.workoutSchema import WorkoutResponse, WorkoutSummaryResponse
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
 from models.workout import Workout
 from models.workout_exercise import WorkoutExercise
-from models.assigned_workout import AssignedWorkout, AssignmentStatus
-from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
+from models.assigned_workout import AssignedWorkout
 from models.user import User, UserRole
 from typing import Optional
 from uuid import UUID
-from api.endpoints.helper_methods import verify_coach_role, verify_coach_client_relationship
+from api.endpoints.helper_methods import verify_coach_role
 
 router = APIRouter()
 
@@ -27,7 +22,7 @@ async def get_workouts(
     is_template: Optional[bool] = Query(None, description="Filter by template status"),
     category: Optional[str] = Query(None, description="Filter by category"),
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get all workouts created by the authenticated coach.
@@ -39,16 +34,23 @@ async def get_workouts(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
-        
-        query = db.query(Workout).filter(Workout.coach_id == coach_user_id)
+        await verify_coach_role(coach_user_id, db)
+
+        query = (
+            select(Workout)
+            .options(joinedload(Workout.workout_exercises))
+            .filter(Workout.coach_id == coach_user_id)
+        )
         
         if is_template is not None:
             query = query.filter(Workout.is_template == is_template)
         if category:
             query = query.filter(Workout.category == category)
         
-        workouts = query.order_by(Workout.created_at.desc()).all()
+        query = query.order_by(Workout.created_at.desc())
+
+        result = await db.execute(query)
+        workouts = result.unique().scalars().all()
         
         # Create summary responses with exercise count
         workout_summaries = []
@@ -64,7 +66,7 @@ async def get_workouts(
                 is_template=workout.is_template,
                 created_at=workout.created_at,
                 updated_at=workout.updated_at,
-                exercise_count=len(workout.workout_exercises)
+                exercise_count=len(workout.workout_exercises or [])
             )
             workout_summaries.append(summary.model_dump())
         
@@ -82,11 +84,11 @@ async def get_workouts(
         )
 
 
-@router.get("/workouts/{workout_id}", response_model=StandardResponse)
+@router.get("/{workout_id}", response_model=StandardResponse)
 async def get_workout(
     workout_id: UUID,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get detailed information about a specific workout including exercises.
@@ -97,9 +99,12 @@ async def get_workout(
     try:
         user_id = UUID(str(current_user.get("user_id")))
         
-        workout = db.query(Workout).options(
-            joinedload(Workout.workout_exercises).joinedload(WorkoutExercise.exercise)
-        ).filter(Workout.id == workout_id).first()
+        result = await db.execute(
+            select(Workout).options(
+                joinedload(Workout.workout_exercises).joinedload(WorkoutExercise.exercise)
+            ).filter(Workout.id == workout_id)
+        )
+        workout = result.unique().scalar_one_or_none()
         
         if not workout:
             raise HTTPException(
@@ -108,7 +113,15 @@ async def get_workout(
             )
         
         # Check authorization - coaches can view their own, clients can view assigned
-        user = db.query(User).filter(User.id == user_id).first()
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User context is invalid"
+            )
+
         if user.role in [UserRole.COACH, UserRole.BOTH]:
             if workout.coach_id != user_id:
                 raise HTTPException(
@@ -117,10 +130,13 @@ async def get_workout(
                 )
         elif user.role == UserRole.CLIENT:
             # Check if workout is assigned to this client
-            assigned = db.query(AssignedWorkout).filter(
-                AssignedWorkout.workout_id == workout_id,
-                AssignedWorkout.client_user_id == user_id
-            ).first()
+            result = await db.execute(
+                select(AssignedWorkout).filter(
+                    AssignedWorkout.workout_id == workout_id,
+                    AssignedWorkout.client_user_id == user_id
+                )
+            )
+            assigned = result.scalar_one_or_none()
             if not assigned:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,

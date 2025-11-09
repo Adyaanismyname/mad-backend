@@ -1,10 +1,10 @@
 from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from db.session import get_db
 from schemas.workoutSchema import (
-    WorkoutCreate, WorkoutUpdate, WorkoutResponse, WorkoutSummaryResponse,
-    WorkoutExerciseCreate, WorkoutExerciseUpdate, WorkoutExerciseResponse,
     AssignedWorkoutCreate, AssignedWorkoutUpdate, AssignedWorkoutResponse,
     AssignedWorkoutSummaryResponse
 )
@@ -13,7 +13,6 @@ from core.auth import verify_user_token
 from models.workout import Workout
 from models.workout_exercise import WorkoutExercise
 from models.assigned_workout import AssignedWorkout, AssignmentStatus
-from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
 from models.user import User, UserRole
 from typing import Optional
 from uuid import UUID
@@ -22,11 +21,11 @@ from api.endpoints.helper_methods import verify_coach_role, verify_coach_client_
 router = APIRouter()
 
 
-@router.post("/workouts/assignments", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/assignments", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
 async def assign_workout_to_client(
     assignment_data: AssignedWorkoutCreate,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     FR-4.2: Assign a workout plan to a specific client (Coach only).
@@ -38,10 +37,11 @@ async def assign_workout_to_client(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
-        
+        await verify_coach_role(coach_user_id, db)
+        print("Verified coach role")
         # Verify workout exists and belongs to coach
-        workout = db.query(Workout).filter(Workout.id == assignment_data.workout_id).first()
+        result = await db.execute(select(Workout).filter(Workout.id == assignment_data.workout_id))
+        workout = result.scalar_one_or_none()
         if not workout:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -55,7 +55,7 @@ async def assign_workout_to_client(
             )
         
         # Verify active coach-client relationship
-        relationship = verify_coach_client_relationship(
+        relationship = await verify_coach_client_relationship(
             coach_user_id,
             assignment_data.client_user_id,
             db
@@ -74,13 +74,18 @@ async def assign_workout_to_client(
         )
         
         db.add(assigned_workout)
-        db.commit()
-        db.refresh(assigned_workout)
+        await db.commit()
+        await db.refresh(assigned_workout)
         
         # Fetch with relationships
-        assigned_workout = db.query(AssignedWorkout).options(
-            joinedload(AssignedWorkout.workout).joinedload(Workout.workout_exercises).joinedload(WorkoutExercise.exercise)
-        ).filter(AssignedWorkout.id == assigned_workout.id).first()
+        result = await db.execute(
+            select(AssignedWorkout).options(
+                joinedload(AssignedWorkout.workout)
+                .joinedload(Workout.workout_exercises)
+                .joinedload(WorkoutExercise.exercise)
+            ).filter(AssignedWorkout.id == assigned_workout.id)
+        )
+        assigned_workout = result.unique().scalar_one_or_none()
         
         response = AssignedWorkoutResponse.model_validate(assigned_workout)
         return StandardResponse(
@@ -91,24 +96,24 @@ async def assign_workout_to_client(
     except HTTPException:
         raise
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid workout or client ID"
         )
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"
         )
 
 
-@router.get("/workouts/assignments/my-workouts", response_model=StandardResponse)
+@router.get("/assignments/my-workouts", response_model=StandardResponse)
 async def get_my_assigned_workouts(
     status_filter: Optional[AssignmentStatus] = Query(None, description="Filter by status"),
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     FR-4.3: Get workouts assigned to the authenticated client.
@@ -121,14 +126,16 @@ async def get_my_assigned_workouts(
     try:
         client_user_id = UUID(str(current_user.get("user_id")))
         
-        query = db.query(AssignedWorkout).options(
+        query = select(AssignedWorkout).options(
             joinedload(AssignedWorkout.workout).joinedload(Workout.workout_exercises).joinedload(WorkoutExercise.exercise)
         ).filter(AssignedWorkout.client_user_id == client_user_id)
         
         if status_filter:
             query = query.filter(AssignedWorkout.status == status_filter)
         
-        assigned_workouts = query.order_by(AssignedWorkout.assigned_date.desc()).all()
+        query = query.order_by(AssignedWorkout.assigned_date.desc())
+        result = await db.execute(query)
+        assigned_workouts = result.unique().scalars().all()
         
         assignments = [AssignedWorkoutResponse.model_validate(aw).model_dump() for aw in assigned_workouts]
         
@@ -144,12 +151,12 @@ async def get_my_assigned_workouts(
         )
 
 
-@router.get("/workouts/assignments/client/{client_id}", response_model=StandardResponse)
+@router.get("/assignments/client/{client_id}", response_model=StandardResponse)
 async def get_client_assigned_workouts(
     client_id: UUID,
     status_filter: Optional[AssignmentStatus] = Query(None, description="Filter by status"),
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get workouts assigned to a specific client (Coach only).
@@ -161,12 +168,12 @@ async def get_client_assigned_workouts(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
+        await verify_coach_role(coach_user_id, db)
         
         # Verify relationship
-        verify_coach_client_relationship(coach_user_id, client_id, db)
+        await verify_coach_client_relationship(coach_user_id, client_id, db)
         
-        query = db.query(AssignedWorkout).options(
+        query = select(AssignedWorkout).options(
             joinedload(AssignedWorkout.workout)
         ).filter(
             AssignedWorkout.client_user_id == client_id,
@@ -176,7 +183,9 @@ async def get_client_assigned_workouts(
         if status_filter:
             query = query.filter(AssignedWorkout.status == status_filter)
         
-        assigned_workouts = query.order_by(AssignedWorkout.assigned_date.desc()).all()
+        query = query.order_by(AssignedWorkout.assigned_date.desc())
+        result = await db.execute(query)
+        assigned_workouts = result.scalars().all()
         
         # Create summary responses
         summaries = []
@@ -208,12 +217,12 @@ async def get_client_assigned_workouts(
         )
 
 
-@router.put("/workouts/assignments/{assignment_id}", response_model=StandardResponse)
+@router.put("/assignments/{assignment_id}", response_model=StandardResponse)
 async def update_assigned_workout(
     assignment_id: UUID,
     assignment_data: AssignedWorkoutUpdate,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Update an assigned workout (Coach or Client).
@@ -226,9 +235,10 @@ async def update_assigned_workout(
     try:
         user_id = UUID(str(current_user.get("user_id")))
         
-        assigned_workout = db.query(AssignedWorkout).filter(
-            AssignedWorkout.id == assignment_id
-        ).first()
+        result = await db.execute(
+            select(AssignedWorkout).filter(AssignedWorkout.id == assignment_id)
+        )
+        assigned_workout = result.scalar_one_or_none()
         
         if not assigned_workout:
             raise HTTPException(
@@ -237,7 +247,8 @@ async def update_assigned_workout(
             )
         
         # Check authorization
-        user = db.query(User).filter(User.id == user_id).first()
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
         is_coach = user.role in [UserRole.COACH, UserRole.BOTH] and assigned_workout.coach_user_id == user_id
         is_client = assigned_workout.client_user_id == user_id
         
@@ -258,13 +269,16 @@ async def update_assigned_workout(
         for field, value in update_data.items():
             setattr(assigned_workout, field, value)
         
-        db.commit()
-        db.refresh(assigned_workout)
+        await db.commit()
+        await db.refresh(assigned_workout)
         
         # Fetch with relationships
-        assigned_workout = db.query(AssignedWorkout).options(
-            joinedload(AssignedWorkout.workout).joinedload(Workout.workout_exercises).joinedload(WorkoutExercise.exercise)
-        ).filter(AssignedWorkout.id == assignment_id).first()
+        result = await db.execute(
+            select(AssignedWorkout).options(
+                joinedload(AssignedWorkout.workout).joinedload(Workout.workout_exercises).joinedload(WorkoutExercise.exercise)
+            ).filter(AssignedWorkout.id == assignment_id)
+        )
+        assigned_workout = result.unique().scalar_one_or_none()
         
         response = AssignedWorkoutResponse.model_validate(assigned_workout)
         return StandardResponse(
@@ -275,18 +289,18 @@ async def update_assigned_workout(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"
         )
 
 
-@router.delete("/workouts/assignments/{assignment_id}", response_model=StandardResponse)
+@router.delete("/assignments/{assignment_id}", response_model=StandardResponse)
 async def delete_assigned_workout(
     assignment_id: UUID,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Delete/unassign a workout (Coach only).
@@ -296,11 +310,12 @@ async def delete_assigned_workout(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
+        await verify_coach_role(coach_user_id, db)
         
-        assigned_workout = db.query(AssignedWorkout).filter(
-            AssignedWorkout.id == assignment_id
-        ).first()
+        result = await db.execute(
+            select(AssignedWorkout).filter(AssignedWorkout.id == assignment_id)
+        )
+        assigned_workout = result.scalar_one_or_none()
         
         if not assigned_workout:
             raise HTTPException(
@@ -314,8 +329,8 @@ async def delete_assigned_workout(
                 detail="Not authorized to delete this assignment"
             )
         
-        db.delete(assigned_workout)
-        db.commit()
+        await db.delete(assigned_workout)
+        await db.commit()
         
         return StandardResponse(
             data={},
@@ -325,7 +340,7 @@ async def delete_assigned_workout(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"

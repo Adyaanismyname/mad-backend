@@ -6,10 +6,11 @@ authentication, and test data creation following FastAPI best practices.
 """
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-from typing import Generator
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
+from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from typing import AsyncGenerator
 import uuid
 from datetime import date, timedelta
 
@@ -37,84 +38,61 @@ if not TEST_DATABASE_URL or TEST_DATABASE_URL == "/gym_app_test":
         "TEST_DATABASE_URL or DATABASE_URL environment variable must be set. "
     )
 
-engine = create_engine(
+engine = create_async_engine(
     TEST_DATABASE_URL,
-    pool_pre_ping=True,
     echo=False,  # Set to True for SQL debugging
+    poolclass=NullPool,  # Use NullPool to avoid event loop issues with connection pooling
 )
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+TestingSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_database():
-    """
-    Create test database tables once per test session.
-    This runs automatically before any tests.
-    """
-    Base.metadata.create_all(bind=engine)
+@pytest_asyncio.fixture(loop_scope="session", autouse=True)
+async def setup_test_database():
+    """Create all database tables once for the entire test session."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     yield
-    # Optionally drop tables after all tests
-    Base.metadata.drop_all(bind=engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
 
 
-@pytest.fixture(scope="function")
-def db_session() -> Generator:
+@pytest_asyncio.fixture()
+async def db_session(setup_test_database) -> AsyncGenerator[AsyncSession, None]:
+    """Provide a transactional database session for each test."""
+    async with engine.connect() as conn:
+        trans = await conn.begin()
+        session = TestingSessionLocal(bind=conn)
+        try:
+            yield session
+        finally:
+            if trans.is_active:
+                await trans.rollback()
+            await session.close()
+
+
+
+@pytest_asyncio.fixture()
+async def client(db_session) -> AsyncGenerator[AsyncClient, None]:
     """
-    Create a fresh database session for each test.
-    
-    This fixture provides a clean database state by truncating all tables
-    before each test, ensuring test isolation while reusing the schema.
-    """
-    session = TestingSessionLocal()
-    
-    # Clear all data from tables 
-    try:
-        # Disable foreign key checks temporarily
-        session.execute(text("SET session_replication_role = 'replica';"))
-        
-        # Truncate all tables
-        for table in reversed(Base.metadata.sorted_tables):
-            session.execute(text(f'TRUNCATE TABLE "{table.name}" CASCADE;'))
-        
-        # Re-enable foreign key checks
-        session.execute(text("SET session_replication_role = 'origin';"))
-        session.commit()
-    except Exception:
-        session.rollback()
-        # If truncate fails (e.g., first run), just continue
-        pass
-    
-    try:
-        yield session
-    finally:
-        session.close()
-
-
-
-@pytest.fixture(scope="function")
-def client(db_session) -> Generator:
-    """
-    Create a FastAPI TestClient with database dependency override.
+    Create a FastAPI AsyncClient with database dependency override.
     
     This fixture provides a test client that uses the test database session
     instead of the production database.
     """
-    def override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
+    async def override_get_db():
+        yield db_session
     
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as test_client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as test_client:
         yield test_client
     app.dependency_overrides.clear()
 
 
 # ============= User Fixtures =============
 
-@pytest.fixture
-def coach_user(db_session) -> User:
+@pytest_asyncio.fixture()
+async def coach_user(db_session) -> User:
     """Create a coach user for testing."""
     user = User(
         id=uuid.uuid4(),
@@ -125,13 +103,13 @@ def coach_user(db_session) -> User:
         phone_number="+1234567890"
     )
     db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    await db_session.flush()
+    await db_session.refresh(user)
     return user
 
 
-@pytest.fixture
-def client_user(db_session) -> User:
+@pytest_asyncio.fixture()
+async def client_user(db_session) -> User:
     """Create a client user for testing."""
     user = User(
         id=uuid.uuid4(),
@@ -142,13 +120,13 @@ def client_user(db_session) -> User:
         phone_number="+0987654321"
     )
     db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    await db_session.flush()
+    await db_session.refresh(user)
     return user
 
 
-@pytest.fixture
-def another_client_user(db_session) -> User:
+@pytest_asyncio.fixture()
+async def another_client_user(db_session) -> User:
     """Create another client user for testing authorization."""
     user = User(
         id=uuid.uuid4(),
@@ -159,13 +137,13 @@ def another_client_user(db_session) -> User:
         phone_number="+1122334455"
     )
     db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    await db_session.flush()
+    await db_session.refresh(user)
     return user
 
 
-@pytest.fixture
-def another_coach_user(db_session) -> User:
+@pytest_asyncio.fixture()
+async def another_coach_user(db_session) -> User:
     """Create another coach user for testing authorization."""
     user = User(
         id=uuid.uuid4(),
@@ -176,8 +154,8 @@ def another_coach_user(db_session) -> User:
         phone_number="+5566778899"
     )
     db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    await db_session.flush()
+    await db_session.refresh(user)
     return user
 
 
@@ -241,8 +219,8 @@ def client_auth_headers(client_token) -> dict:
 
 # ============= Relationship Fixtures =============
 
-@pytest.fixture
-def coach_client_relationship(db_session, coach_user, client_user) -> CoachClientRelationship:
+@pytest_asyncio.fixture()
+async def coach_client_relationship(db_session, coach_user, client_user) -> CoachClientRelationship:
     """Create an active coach-client relationship."""
     relationship = CoachClientRelationship(
         id=uuid.uuid4(),
@@ -251,15 +229,15 @@ def coach_client_relationship(db_session, coach_user, client_user) -> CoachClien
         status=RelationshipStatus.ACTIVE
     )
     db_session.add(relationship)
-    db_session.commit()
-    db_session.refresh(relationship)
+    await db_session.flush()
+    await db_session.refresh(relationship)
     return relationship
 
 
 # ============= Exercise Fixtures =============
 
-@pytest.fixture
-def sample_exercise(db_session) -> Exercise:
+@pytest_asyncio.fixture()
+async def sample_exercise(db_session) -> Exercise:
     """Create a sample exercise for testing."""
     exercise = Exercise(
         id=uuid.uuid4(),
@@ -272,13 +250,13 @@ def sample_exercise(db_session) -> Exercise:
         equipment_needed=["barbell", "bench"]
     )
     db_session.add(exercise)
-    db_session.commit()
-    db_session.refresh(exercise)
+    await db_session.flush()
+    await db_session.refresh(exercise)
     return exercise
 
 
-@pytest.fixture
-def another_exercise(db_session) -> Exercise:
+@pytest_asyncio.fixture()
+async def another_exercise(db_session) -> Exercise:
     """Create another exercise for testing."""
     exercise = Exercise(
         id=uuid.uuid4(),
@@ -291,15 +269,15 @@ def another_exercise(db_session) -> Exercise:
         equipment_needed=["barbell", "rack"]
     )
     db_session.add(exercise)
-    db_session.commit()
-    db_session.refresh(exercise)
+    await db_session.flush()
+    await db_session.refresh(exercise)
     return exercise
 
 
 # ============= Workout Fixtures =============
 
-@pytest.fixture
-def sample_workout(db_session, coach_user, sample_exercise) -> Workout:
+@pytest_asyncio.fixture()
+async def sample_workout(db_session, coach_user, sample_exercise) -> Workout:
     """Create a sample workout with exercises."""
     workout = Workout(
         id=uuid.uuid4(),
@@ -312,12 +290,13 @@ def sample_workout(db_session, coach_user, sample_exercise) -> Workout:
         is_template=False
     )
     db_session.add(workout)
-    db_session.flush()
-    
+    await db_session.flush()
+
     # Add exercise to workout
     workout_exercise = WorkoutExercise(
         id=uuid.uuid4(),
         workout_id=workout.id,
+        workout=workout,
         exercise_id=sample_exercise.id,
         order_index=1,
         sets=3,
@@ -326,13 +305,13 @@ def sample_workout(db_session, coach_user, sample_exercise) -> Workout:
         notes="Focus on form"
     )
     db_session.add(workout_exercise)
-    db_session.commit()
-    db_session.refresh(workout)
+    await db_session.flush()
+    await db_session.refresh(workout, attribute_names=["workout_exercises"])
     return workout
 
 
-@pytest.fixture
-def workout_template(db_session, coach_user, sample_exercise) -> Workout:
+@pytest_asyncio.fixture()
+async def workout_template(db_session, coach_user, sample_exercise) -> Workout:
     """Create a workout template."""
     workout = Workout(
         id=uuid.uuid4(),
@@ -345,15 +324,15 @@ def workout_template(db_session, coach_user, sample_exercise) -> Workout:
         is_template=True
     )
     db_session.add(workout)
-    db_session.commit()
-    db_session.refresh(workout)
+    await db_session.flush()
+    await db_session.refresh(workout)
     return workout
 
 
 # ============= Assignment Fixtures =============
 
-@pytest.fixture
-def assigned_workout(db_session, sample_workout, coach_user, client_user, coach_client_relationship) -> AssignedWorkout:
+@pytest_asyncio.fixture()
+async def assigned_workout(db_session, sample_workout, coach_user, client_user, coach_client_relationship) -> AssignedWorkout:
     """Create an assigned workout."""
     assignment = AssignedWorkout(
         id=uuid.uuid4(),
@@ -367,15 +346,15 @@ def assigned_workout(db_session, sample_workout, coach_user, client_user, coach_
         coach_notes="Focus on technique this week"
     )
     db_session.add(assignment)
-    db_session.commit()
-    db_session.refresh(assignment)
+    await db_session.flush()
+    await db_session.refresh(assignment)
     return assignment
 
 
 # ============= Media Fixtures =============
 
-@pytest.fixture
-def sample_media(db_session, client_user, sample_exercise, assigned_workout) -> MediaUpload:
+@pytest_asyncio.fixture()
+async def sample_media(db_session, client_user, sample_exercise, assigned_workout) -> MediaUpload:
     """Create a sample media upload."""
     media = MediaUpload(
         id=uuid.uuid4(),
@@ -387,15 +366,15 @@ def sample_media(db_session, client_user, sample_exercise, assigned_workout) -> 
         status="ready"
     )
     db_session.add(media)
-    db_session.commit()
-    db_session.refresh(media)
+    await db_session.flush()
+    await db_session.refresh(media)
     return media
 
 
 # ============= Feedback Fixtures =============
 
-@pytest.fixture
-def sample_feedback(db_session, sample_media, coach_user) -> Feedback:
+@pytest_asyncio.fixture()
+async def sample_feedback(db_session, sample_media, coach_user) -> Feedback:
     """Create sample feedback on media."""
     feedback = Feedback(
         id=uuid.uuid4(),
@@ -405,14 +384,14 @@ def sample_feedback(db_session, sample_media, coach_user) -> Feedback:
         annotation_data={"timestamp": 15.5, "note": "Watch elbow position"}
     )
     db_session.add(feedback)
-    db_session.commit()
-    db_session.refresh(feedback)
+    await db_session.flush()
+    await db_session.refresh(feedback)
     return feedback
 
 
 # ============= Helper Functions =============
 
-def create_workout_data(exercise_id: str = None) -> dict:
+def create_workout_data(exercise_id: str | None = None) -> dict:
     """Helper function to create workout request data."""
     data = {
         "name": "Test Workout",
@@ -449,7 +428,7 @@ def create_assignment_data(workout_id: str, client_id: str) -> dict:
     }
 
 
-def create_media_data(exercise_id: str, assigned_workout_id: str = None) -> dict:
+def create_media_data(exercise_id: str, assigned_workout_id: str | None = None) -> dict:
     """Helper function to create media upload request data."""
     return {
         "assigned_workout_id": assigned_workout_id,

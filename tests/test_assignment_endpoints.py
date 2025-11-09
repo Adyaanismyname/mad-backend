@@ -18,17 +18,17 @@ from tests.conftest import create_assignment_data
 @pytest.mark.workout
 @pytest.mark.unit
 class TestAssignWorkout:
-    """Test suite for POST /workouts/workouts/assignments endpoint."""
+    """Test suite for POST /workouts/assignments endpoint."""
     
-    def test_assign_workout_success(self, client, auth_headers, sample_workout, client_user, coach_client_relationship):
+    async def test_assign_workout_success(self, client, auth_headers, sample_workout, client_user, coach_client_relationship):
         """Test successful workout assignment to client."""
         assignment_data = create_assignment_data(
             str(sample_workout.id),
             str(client_user.id)
         )
         
-        response = client.post(
-            "/workouts/workouts/assignments",
+        response = await client.post(
+            "/workouts/assignments",
             json=assignment_data,
             headers=auth_headers
         )
@@ -41,15 +41,15 @@ class TestAssignWorkout:
         assert data["data"]["status"] == "assigned"
         assert "workout" in data["data"]
     
-    def test_assign_workout_without_relationship(self, client, auth_headers, sample_workout, another_client_user):
+    async def test_assign_workout_without_relationship(self, client, auth_headers, sample_workout, another_client_user):
         """Test assignment fails without active coach-client relationship."""
         assignment_data = create_assignment_data(
             str(sample_workout.id),
             str(another_client_user.id)
         )
         
-        response = client.post(
-            "/workouts/workouts/assignments",
+        response = await client.post(
+            "/workouts/assignments",
             json=assignment_data,
             headers=auth_headers
         )
@@ -57,7 +57,7 @@ class TestAssignWorkout:
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert "relationship" in response.json()["detail"].lower()
     
-    def test_assign_workout_different_coach(self, client, another_coach_token, sample_workout, client_user):
+    async def test_assign_workout_different_coach(self, client, another_coach_token, sample_workout, client_user):
         """Test coach cannot assign another coach's workout."""
         headers = {"Authorization": f"Bearer {another_coach_token}"}
         assignment_data = create_assignment_data(
@@ -65,45 +65,45 @@ class TestAssignWorkout:
             str(client_user.id)
         )
         
-        response = client.post(
-            "/workouts/workouts/assignments",
+        response = await client.post(
+            "/workouts/assignments",
             json=assignment_data,
             headers=headers
         )
         
         assert response.status_code == status.HTTP_403_FORBIDDEN
     
-    def test_assign_nonexistent_workout(self, client, auth_headers, client_user, coach_client_relationship):
+    async def test_assign_nonexistent_workout(self, client, auth_headers, client_user, coach_client_relationship):
         """Test assigning non-existent workout."""
         assignment_data = create_assignment_data(
             str(uuid4()),
             str(client_user.id)
         )
         
-        response = client.post(
-            "/workouts/workouts/assignments",
+        response = await client.post(
+            "/workouts/assignments",
             json=assignment_data,
             headers=auth_headers
         )
         
         assert response.status_code == status.HTTP_404_NOT_FOUND
     
-    def test_assign_as_client_forbidden(self, client, client_auth_headers, sample_workout, client_user):
+    async def test_assign_as_client_forbidden(self, client, client_auth_headers, sample_workout, client_user):
         """Test clients cannot assign workouts."""
         assignment_data = create_assignment_data(
             str(sample_workout.id),
             str(client_user.id)
         )
         
-        response = client.post(
-            "/workouts/workouts/assignments",
+        response = await client.post(
+            "/workouts/assignments",
             json=assignment_data,
             headers=client_auth_headers
         )
         
         assert response.status_code == status.HTTP_403_FORBIDDEN
     
-    def test_assign_workout_with_due_date(self, client, auth_headers, sample_workout, client_user, coach_client_relationship):
+    async def test_assign_workout_with_due_date(self, client, auth_headers, sample_workout, client_user, coach_client_relationship):
         """Test assignment with specific due date."""
         assignment_data = create_assignment_data(
             str(sample_workout.id),
@@ -111,8 +111,8 @@ class TestAssignWorkout:
         )
         assignment_data["due_date"] = (date.today() + timedelta(days=14)).isoformat()
         
-        response = client.post(
-            "/workouts/workouts/assignments",
+        response = await client.post(
+            "/workouts/assignments",
             json=assignment_data,
             headers=auth_headers
         )
@@ -126,12 +126,12 @@ class TestAssignWorkout:
 @pytest.mark.workout
 @pytest.mark.unit
 class TestGetMyAssignedWorkouts:
-    """Test suite for GET /workouts/workouts/assignments/my-workouts endpoint."""
+    """Test suite for GET /workouts/assignments/my-workouts endpoint."""
     
-    def test_get_my_workouts_success(self, client, client_auth_headers, assigned_workout):
+    async def test_get_my_workouts_success(self, client, client_auth_headers, assigned_workout):
         """Test client retrieving their assigned workouts."""
-        response = client.get(
-            "/workouts/workouts/assignments/my-workouts",
+        response = await client.get(
+            "/workouts/assignments/my-workouts",
             headers=client_auth_headers
         )
         
@@ -144,10 +144,10 @@ class TestGetMyAssignedWorkouts:
         assert "workout" in data["data"][0]
         assert "workout_exercises" in data["data"][0]["workout"]
     
-    def test_get_my_workouts_filter_by_status(self, client, client_auth_headers, assigned_workout):
+    async def test_get_my_workouts_filter_by_status(self, client, client_auth_headers, assigned_workout):
         """Test filtering assigned workouts by status."""
-        response = client.get(
-            "/workouts/workouts/assignments/my-workouts?status_filter=assigned",
+        response = await client.get(
+            "/workouts/assignments/my-workouts?status_filter=assigned",
             headers=client_auth_headers
         )
         
@@ -156,12 +156,12 @@ class TestGetMyAssignedWorkouts:
         for assignment in data["data"]:
             assert assignment["status"] == "assigned"
     
-    def test_get_my_workouts_empty_list(self, client, another_client_token):
+    async def test_get_my_workouts_empty_list(self, client, another_client_token):
         """Test client with no assignments gets empty list."""
         headers = {"Authorization": f"Bearer {another_client_token}"}
         
-        response = client.get(
-            "/workouts/workouts/assignments/my-workouts",
+        response = await client.get(
+            "/workouts/assignments/my-workouts",
             headers=headers
         )
         
@@ -169,9 +169,9 @@ class TestGetMyAssignedWorkouts:
         data = response.json()
         assert len(data["data"]) == 0
     
-    def test_get_my_workouts_unauthorized(self, client):
+    async def test_get_my_workouts_unauthorized(self, client):
         """Test getting assignments without authentication."""
-        response = client.get("/workouts/workouts/assignments/my-workouts")
+        response = await client.get("/workouts/assignments/my-workouts")
         
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -179,12 +179,12 @@ class TestGetMyAssignedWorkouts:
 @pytest.mark.workout
 @pytest.mark.unit
 class TestGetClientAssignedWorkouts:
-    """Test suite for GET /workouts/workouts/assignments/client/{client_id} endpoint."""
+    """Test suite for GET /workouts/assignments/client/{client_id} endpoint."""
     
-    def test_get_client_workouts_success(self, client, auth_headers, client_user, assigned_workout):
+    async def test_get_client_workouts_success(self, client, auth_headers, client_user, assigned_workout):
         """Test coach retrieving client's assigned workouts."""
-        response = client.get(
-            f"/workouts/workouts/assignments/client/{client_user.id}",
+        response = await client.get(
+            f"/workouts/assignments/client/{client_user.id}",
             headers=auth_headers
         )
         
@@ -194,10 +194,10 @@ class TestGetClientAssignedWorkouts:
         assert len(data["data"]) >= 1
         assert data["data"][0]["client_user_id"] == str(client_user.id)
     
-    def test_get_client_workouts_filter_by_status(self, client, auth_headers, client_user, assigned_workout):
+    async def test_get_client_workouts_filter_by_status(self, client, auth_headers, client_user, assigned_workout):
         """Test filtering client workouts by status."""
-        response = client.get(
-            f"/workouts/workouts/assignments/client/{client_user.id}?status_filter=assigned",
+        response = await client.get(
+            f"/workouts/assignments/client/{client_user.id}?status_filter=assigned",
             headers=auth_headers
         )
         
@@ -206,21 +206,21 @@ class TestGetClientAssignedWorkouts:
         for assignment in data["data"]:
             assert assignment["status"] == "assigned"
     
-    def test_get_client_workouts_without_relationship(self, client, another_coach_token, client_user):
+    async def test_get_client_workouts_without_relationship(self, client, another_coach_token, client_user):
         """Test coach cannot view workouts of client without relationship."""
         headers = {"Authorization": f"Bearer {another_coach_token}"}
         
-        response = client.get(
-            f"/workouts/workouts/assignments/client/{client_user.id}",
+        response = await client.get(
+            f"/workouts/assignments/client/{client_user.id}",
             headers=headers
         )
         
         assert response.status_code == status.HTTP_403_FORBIDDEN
     
-    def test_get_client_workouts_as_client_forbidden(self, client, client_auth_headers, another_client_user):
+    async def test_get_client_workouts_as_client_forbidden(self, client, client_auth_headers, another_client_user):
         """Test client cannot view another client's workouts."""
-        response = client.get(
-            f"/workouts/workouts/assignments/client/{another_client_user.id}",
+        response = await client.get(
+            f"/workouts/assignments/client/{another_client_user.id}",
             headers=client_auth_headers
         )
         
@@ -232,9 +232,9 @@ class TestGetClientAssignedWorkouts:
 @pytest.mark.workout
 @pytest.mark.unit
 class TestUpdateAssignedWorkout:
-    """Test suite for PUT /workouts/workouts/assignments/{assignment_id} endpoint."""
+    """Test suite for PUT /workouts/assignments/{assignment_id} endpoint."""
     
-    def test_coach_update_assignment(self, client, auth_headers, assigned_workout):
+    async def test_coach_update_assignment(self, client, auth_headers, assigned_workout):
         """Test coach updating assignment details."""
         update_data = {
             "due_date": (date.today() + timedelta(days=14)).isoformat(),
@@ -242,8 +242,8 @@ class TestUpdateAssignedWorkout:
             "coach_notes": "Updated notes from coach"
         }
         
-        response = client.put(
-            f"/workouts/workouts/assignments/{assigned_workout.id}",
+        response = await client.put(
+            f"/workouts/assignments/{assigned_workout.id}",
             json=update_data,
             headers=auth_headers
         )
@@ -254,15 +254,15 @@ class TestUpdateAssignedWorkout:
         assert data["data"]["coach_notes"] == update_data["coach_notes"]
         assert data["data"]["status"] == update_data["status"]
     
-    def test_client_update_assignment(self, client, client_auth_headers, assigned_workout):
+    async def test_client_update_assignment(self, client, client_auth_headers, assigned_workout):
         """Test client updating their assignment status and notes."""
         update_data = {
             "status": "completed",
             "client_notes": "Finished all sets successfully!"
         }
         
-        response = client.put(
-            f"/workouts/workouts/assignments/{assigned_workout.id}",
+        response = await client.put(
+            f"/workouts/assignments/{assigned_workout.id}",
             json=update_data,
             headers=client_auth_headers
         )
@@ -272,15 +272,15 @@ class TestUpdateAssignedWorkout:
         assert data["data"]["status"] == update_data["status"]
         assert data["data"]["client_notes"] == update_data["client_notes"]
     
-    def test_client_cannot_update_coach_fields(self, client, client_auth_headers, assigned_workout):
+    async def test_client_cannot_update_coach_fields(self, client, client_auth_headers, assigned_workout):
         """Test client cannot update coach-specific fields."""
         update_data = {
             "coach_notes": "Hacking coach notes",
             "due_date": (date.today() + timedelta(days=30)).isoformat()
         }
         
-        response = client.put(
-            f"/workouts/workouts/assignments/{assigned_workout.id}",
+        response = await client.put(
+            f"/workouts/assignments/{assigned_workout.id}",
             json=update_data,
             headers=client_auth_headers
         )
@@ -290,26 +290,26 @@ class TestUpdateAssignedWorkout:
         # Coach notes should not be updated by client
         assert data["data"]["coach_notes"] != update_data["coach_notes"]
     
-    def test_update_another_clients_assignment(self, client, another_client_token, assigned_workout):
+    async def test_update_another_clients_assignment(self, client, another_client_token, assigned_workout):
         """Test client cannot update another client's assignment."""
         headers = {"Authorization": f"Bearer {another_client_token}"}
         update_data = {"status": "completed"}
         
-        response = client.put(
-            f"/workouts/workouts/assignments/{assigned_workout.id}",
+        response = await client.put(
+            f"/workouts/assignments/{assigned_workout.id}",
             json=update_data,
             headers=headers
         )
         
         assert response.status_code == status.HTTP_403_FORBIDDEN
     
-    def test_update_nonexistent_assignment(self, client, auth_headers):
+    async def test_update_nonexistent_assignment(self, client, auth_headers):
         """Test updating non-existent assignment."""
         fake_id = uuid4()
         update_data = {"status": "completed"}
         
-        response = client.put(
-            f"/workouts/workouts/assignments/{fake_id}",
+        response = await client.put(
+            f"/workouts/assignments/{fake_id}",
             json=update_data,
             headers=auth_headers
         )
@@ -322,12 +322,12 @@ class TestUpdateAssignedWorkout:
 @pytest.mark.workout
 @pytest.mark.unit
 class TestDeleteAssignedWorkout:
-    """Test suite for DELETE /workouts/workouts/assignments/{assignment_id} endpoint."""
+    """Test suite for DELETE /workouts/assignments/{assignment_id} endpoint."""
     
-    def test_delete_assignment_success(self, client, auth_headers, assigned_workout):
+    async def test_delete_assignment_success(self, client, auth_headers, assigned_workout):
         """Test coach successfully deleting assignment."""
-        response = client.delete(
-            f"/workouts/workouts/assignments/{assigned_workout.id}",
+        response = await client.delete(
+            f"/workouts/assignments/{assigned_workout.id}",
             headers=auth_headers
         )
         
@@ -335,32 +335,32 @@ class TestDeleteAssignedWorkout:
         data = response.json()
         assert data["message"] == "Assignment deleted successfully"
     
-    def test_delete_assignment_by_different_coach(self, client, another_coach_token, assigned_workout):
+    async def test_delete_assignment_by_different_coach(self, client, another_coach_token, assigned_workout):
         """Test coach cannot delete another coach's assignment."""
         headers = {"Authorization": f"Bearer {another_coach_token}"}
         
-        response = client.delete(
-            f"/workouts/workouts/assignments/{assigned_workout.id}",
+        response = await client.delete(
+            f"/workouts/assignments/{assigned_workout.id}",
             headers=headers
         )
         
         assert response.status_code == status.HTTP_403_FORBIDDEN
     
-    def test_delete_assignment_as_client_forbidden(self, client, client_auth_headers, assigned_workout):
+    async def test_delete_assignment_as_client_forbidden(self, client, client_auth_headers, assigned_workout):
         """Test client cannot delete assignments."""
-        response = client.delete(
-            f"/workouts/workouts/assignments/{assigned_workout.id}",
+        response = await client.delete(
+            f"workouts/assignments/{assigned_workout.id}",
             headers=client_auth_headers
         )
         
         assert response.status_code == status.HTTP_403_FORBIDDEN
     
-    def test_delete_nonexistent_assignment(self, client, auth_headers):
+    async def test_delete_nonexistent_assignment(self, client, auth_headers):
         """Test deleting non-existent assignment."""
         fake_id = uuid4()
         
-        response = client.delete(
-            f"/workouts/workouts/assignments/{fake_id}",
+        response = await client.delete(
+            f"workouts/assignments/{fake_id}",
             headers=auth_headers
         )
         
@@ -374,7 +374,7 @@ class TestDeleteAssignedWorkout:
 class TestAssignmentWorkflow:
     """Integration tests for complete assignment workflows."""
     
-    def test_complete_assignment_lifecycle(
+    async def test_complete_assignment_lifecycle(
         self, client, auth_headers, client_auth_headers,
         sample_workout, client_user, coach_client_relationship
     ):
@@ -384,8 +384,8 @@ class TestAssignmentWorkflow:
             str(sample_workout.id),
             str(client_user.id)
         )
-        assign_response = client.post(
-            "/workouts/workouts/assignments",
+        assign_response = await client.post(
+            "/workouts/assignments",
             json=assignment_data,
             headers=auth_headers
         )
@@ -393,8 +393,8 @@ class TestAssignmentWorkflow:
         assignment_id = assign_response.json()["data"]["id"]
         
         # 2. Client views their workouts
-        view_response = client.get(
-            "/workouts/workouts/assignments/my-workouts",
+        view_response = await client.get(
+            "/workouts/assignments/my-workouts",
             headers=client_auth_headers
         )
         assert view_response.status_code == status.HTTP_200_OK
@@ -405,16 +405,16 @@ class TestAssignmentWorkflow:
             "status": "in_progress",
             "client_notes": "Started today"
         }
-        client_update_response = client.put(
-            f"/workouts/workouts/assignments/{assignment_id}",
+        client_update_response = await client.put(
+            f"/workouts/assignments/{assignment_id}",
             json=client_update,
             headers=client_auth_headers
         )
         assert client_update_response.status_code == status.HTTP_200_OK
         
         # 4. Coach checks progress
-        coach_check_response = client.get(
-            f"/workouts/workouts/assignments/client/{client_user.id}",
+        coach_check_response = await client.get(
+            f"/workouts/assignments/client/{client_user.id}",
             headers=auth_headers
         )
         assert coach_check_response.status_code == status.HTTP_200_OK
@@ -423,15 +423,15 @@ class TestAssignmentWorkflow:
         
         # 5. Client completes workout
         complete_update = {"status": "completed"}
-        complete_response = client.put(
-            f"/workouts/workouts/assignments/{assignment_id}",
+        complete_response = await client.put(
+            f"/workouts/assignments/{assignment_id}",
             json=complete_update,
             headers=client_auth_headers
         )
         assert complete_response.status_code == status.HTTP_200_OK
         assert complete_response.json()["data"]["status"] == "completed"
     
-    def test_multiple_assignments_to_same_client(
+    async def test_multiple_assignments_to_same_client(
         self, client, auth_headers, client_auth_headers, sample_workout, workout_template,
         client_user, coach_client_relationship
     ):
@@ -441,8 +441,8 @@ class TestAssignmentWorkflow:
             str(sample_workout.id),
             str(client_user.id)
         )
-        response1 = client.post(
-            "/workouts/workouts/assignments",
+        response1 = await client.post(
+            "/workouts/assignments",
             json=assignment1_data,
             headers=auth_headers
         )
@@ -453,16 +453,16 @@ class TestAssignmentWorkflow:
             str(workout_template.id),
             str(client_user.id)
         )
-        response2 = client.post(
-            "/workouts/workouts/assignments",
+        response2 = await client.post(
+            "/workouts/assignments",
             json=assignment2_data,
             headers=auth_headers
         )
         assert response2.status_code == status.HTTP_201_CREATED
         
         # Verify client sees both assignments
-        get_response = client.get(
-            "/workouts/workouts/assignments/my-workouts",
+        get_response = await client.get(
+            "/workouts/assignments/my-workouts",
             headers=client_auth_headers  # Use client's auth headers to get their workouts
         )
         assert get_response.status_code == status.HTTP_200_OK
@@ -476,7 +476,7 @@ class TestAssignmentWorkflow:
 class TestAssignmentEdgeCases:
     """Test edge cases and boundary conditions."""
     
-    def test_assign_workout_past_due_date(self, client, auth_headers, sample_workout, client_user, coach_client_relationship):
+    async def test_assign_workout_past_due_date(self, client, auth_headers, sample_workout, client_user, coach_client_relationship):
         """Test assignment with past due date."""
         assignment_data = create_assignment_data(
             str(sample_workout.id),
@@ -485,8 +485,8 @@ class TestAssignmentEdgeCases:
         # Set due date in the past
         assignment_data["due_date"] = (date.today() - timedelta(days=1)).isoformat()
         
-        response = client.post(
-            "/workouts/workouts/assignments",
+        response = await client.post(
+            "/workouts/assignments",
             json=assignment_data,
             headers=auth_headers
         )
@@ -494,7 +494,7 @@ class TestAssignmentEdgeCases:
         # Should still create the assignment (business logic might vary)
         assert response.status_code == status.HTTP_201_CREATED
     
-    def test_update_assignment_all_status_transitions(self, client, client_user, client_token, db_session, sample_workout, coach_client_relationship):
+    async def test_update_assignment_all_status_transitions(self, client, client_user, client_token, db_session, sample_workout, coach_client_relationship):
         """Test all valid status transitions."""
         from models.assigned_workout import AssignedWorkout, AssignmentStatus
         
@@ -509,15 +509,15 @@ class TestAssignmentEdgeCases:
             status=AssignmentStatus.ASSIGNED
         )
         db_session.add(assignment)
-        db_session.commit()
+        await db_session.commit()
         
         client_headers = {"Authorization": f"Bearer {client_token}"}
         statuses = ["in_progress", "completed", "skipped"]
         
         for status_value in statuses:
             update_data = {"status": status_value}
-            response = client.put(
-                f"/workouts/workouts/assignments/{assignment.id}",
+            response = await client.put(
+                f"/workouts/assignments/{assignment.id}",
                 json=update_data,
                 headers=client_headers
             )

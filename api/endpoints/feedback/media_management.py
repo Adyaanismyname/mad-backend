@@ -1,33 +1,23 @@
-from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
+from fastapi import APIRouter, status, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from db.session import get_db
-from schemas.feedbackSchema import (
-    MediaUploadCreate, MediaUploadResponse,
-    FeedbackCreate, FeedbackUpdate, FeedbackResponse,
-    MediaWithFeedbackResponse
-)
-from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
-
+from schemas.feedbackSchema import MediaUploadResponse
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
 from models.media_upload import MediaUpload
-from models.feedback import Feedback
-from models.assigned_workout import AssignedWorkout
 from models.user import User, UserRole
-from typing import Optional
 from uuid import UUID
-from api.endpoints.helper_methods import verify_coach_role, verify_coach_client_relationship
+from api.endpoints.helper_methods import verify_coach_client_relationship
 
-router = APIRouter()
+router = APIRouter(prefix="/media")
 
 
-
-@router.get("/media/{media_id}", response_model=StandardResponse)
+@router.get("/{media_id}", response_model=StandardResponse)
 async def get_media_details(
     media_id: UUID,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get detailed information about a specific media upload.
@@ -40,7 +30,8 @@ async def get_media_details(
     try:
         user_id = UUID(str(current_user.get("user_id")))
         
-        media = db.query(MediaUpload).filter(MediaUpload.id == media_id).first()
+        result = await db.execute(select(MediaUpload).filter(MediaUpload.id == media_id))
+        media = result.scalar_one_or_none()
         
         if not media:
             raise HTTPException(
@@ -49,14 +40,15 @@ async def get_media_details(
             )
         
         # Check authorization
-        user = db.query(User).filter(User.id == user_id).first()
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
         
         # Client can view their own media
         if media.client_user_id == user_id:
             pass
         # Coach can view media from their clients
         elif user.role in [UserRole.COACH, UserRole.BOTH]:
-            verify_coach_client_relationship(user_id, media.client_user_id, db)
+            await verify_coach_client_relationship(user_id, media.client_user_id, db)
         else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -78,11 +70,11 @@ async def get_media_details(
         )
 
 
-@router.delete("/media/{media_id}", response_model=StandardResponse)
+@router.delete("/{media_id}", response_model=StandardResponse)
 async def delete_media(
     media_id: UUID,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Delete a media upload (Client who uploaded it only).
@@ -93,7 +85,8 @@ async def delete_media(
     try:
         client_user_id = UUID(str(current_user.get("user_id")))
         
-        media = db.query(MediaUpload).filter(MediaUpload.id == media_id).first()
+        result = await db.execute(select(MediaUpload).filter(MediaUpload.id == media_id))
+        media = result.scalar_one_or_none()
         
         if not media:
             raise HTTPException(
@@ -107,8 +100,8 @@ async def delete_media(
                 detail="Not authorized to delete this media"
             )
         
-        db.delete(media)
-        db.commit()
+        await db.delete(media)
+        await db.commit()
         
         return StandardResponse(
             data={},
@@ -118,7 +111,7 @@ async def delete_media(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"

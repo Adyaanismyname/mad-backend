@@ -53,7 +53,7 @@ class FeedbackResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     coach_name: Optional[str] = None  # Added for convenience
-    replies: List["FeedbackResponse"] = []  # Nested replies
+    replies: List["FeedbackResponse"] = Field(default_factory=list)  # Nested replies
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -74,6 +74,6 @@ class MediaWithFeedbackResponse(BaseModel):
     media_type: str
     status: Optional[str] = None
     created_at: datetime
-    feedback: List[FeedbackResponse] = []
+    feedback: List[FeedbackResponse] = Field(default_factory=list)
     
     model_config = ConfigDict(from_attributes=True)

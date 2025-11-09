@@ -17,3 +17,7 @@ docker-compose.yml
 .vscode/
 .idea/
 .DS_Store
+
+.coverage
+htmlcov/
+.pytest_cache/

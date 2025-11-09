@@ -18,3 +18,5 @@ class Settings(BaseSettings):
         
 
 settings = Settings()  # type: ignore[call-arg]
+print("in settings", settings.DATABASE_URL)
+print("in settings", settings.TEST_DATABASE_URL)

@@ -1,33 +1,27 @@
-from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
+from fastapi import APIRouter, status, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+from sqlalchemy import select
 from db.session import get_db
-from schemas.feedbackSchema import (
-    MediaUploadCreate, MediaUploadResponse,
-    FeedbackCreate, FeedbackUpdate, FeedbackResponse,
-    MediaWithFeedbackResponse
-)
-from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
-
+from schemas.feedbackSchema import MediaWithFeedbackResponse
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
 from models.media_upload import MediaUpload
 from models.feedback import Feedback
-from models.assigned_workout import AssignedWorkout
 from models.user import User, UserRole
-from typing import Optional
 from uuid import UUID
-from api.endpoints.helper_methods import verify_coach_role, verify_coach_client_relationship
+from api.endpoints.helper_methods import verify_coach_client_relationship
+from api.endpoints.feedback.serializers import serialize_feedback
 
-router = APIRouter()
+router = APIRouter(prefix="/media")
 
 
 
-@router.get("/media/{media_id}/feedback", response_model=StandardResponse)
+@router.get("/{media_id}/feedback", response_model=StandardResponse)
 async def get_media_feedback(
     media_id: UUID,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     FR-5.2: Get all feedback for a specific media upload.
@@ -42,7 +36,8 @@ async def get_media_feedback(
         user_id = UUID(str(current_user.get("user_id")))
         
         # Verify media exists and user has access
-        media = db.query(MediaUpload).filter(MediaUpload.id == media_id).first()
+        result = await db.execute(select(MediaUpload).filter(MediaUpload.id == media_id))
+        media = result.scalar_one_or_none()
         
         if not media:
             raise HTTPException(
@@ -51,14 +46,20 @@ async def get_media_feedback(
             )
         
         # Check authorization
-        user = db.query(User).filter(User.id == user_id).first()
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
         
         # Client can view feedback on their own media
         if media.client_user_id == user_id:
             pass
         # Coach can view feedback on their clients' media
         elif user.role in [UserRole.COACH, UserRole.BOTH]:
-            verify_coach_client_relationship(user_id, media.client_user_id, db)
+            await verify_coach_client_relationship(user_id, media.client_user_id, db)
         else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -66,19 +67,19 @@ async def get_media_feedback(
             )
         
         # Get all feedback for this media (with coach details)
-        all_feedback = db.query(Feedback).options(
-            joinedload(Feedback.coach)
-        ).filter(Feedback.media_id == media_id).order_by(Feedback.created_at.asc()).all()
+        result = await db.execute(
+            select(Feedback).options(
+                joinedload(Feedback.coach)
+            ).filter(Feedback.media_id == media_id).order_by(Feedback.created_at.asc())
+        )
+        all_feedback = result.scalars().all()
         
         # Build hierarchical structure
         feedback_map = {}
         root_feedback = []
         
         for fb in all_feedback:
-            fb_response = FeedbackResponse.model_validate(fb)
-            fb_dict = fb_response.model_dump()
-            fb_dict["coach_name"] = fb.coach.full_name if fb.coach else None
-            fb_dict["replies"] = []
+            fb_dict = serialize_feedback(fb)
             feedback_map[fb.id] = fb_dict
         
         for fb in all_feedback:
@@ -102,11 +103,11 @@ async def get_media_feedback(
         )
 
 
-@router.get("/media/{media_id}/with-feedback", response_model=StandardResponse)
+@router.get("/{media_id}/with-feedback", response_model=StandardResponse)
 async def get_media_with_feedback(
     media_id: UUID,
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     FR-5.2: Get media upload with all associated feedback in one response.
@@ -118,9 +119,12 @@ async def get_media_with_feedback(
         user_id = UUID(str(current_user.get("user_id")))
         
         # Verify media exists and load with feedback
-        media = db.query(MediaUpload).options(
-            joinedload(MediaUpload.feedback).joinedload(Feedback.coach)
-        ).filter(MediaUpload.id == media_id).first()
+        result = await db.execute(
+            select(MediaUpload).options(
+                joinedload(MediaUpload.feedback).joinedload(Feedback.coach)
+            ).filter(MediaUpload.id == media_id)
+        )
+        media = result.unique().scalar_one_or_none()
         
         if not media:
             raise HTTPException(
@@ -129,12 +133,18 @@ async def get_media_with_feedback(
             )
         
         # Check authorization
-        user = db.query(User).filter(User.id == user_id).first()
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
         
         if media.client_user_id == user_id:
             pass
         elif user.role in [UserRole.COACH, UserRole.BOTH]:
-            verify_coach_client_relationship(user_id, media.client_user_id, db)
+            await verify_coach_client_relationship(user_id, media.client_user_id, db)
         else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -146,10 +156,7 @@ async def get_media_with_feedback(
         root_feedback = []
         
         for fb in media.feedback:
-            fb_response = FeedbackResponse.model_validate(fb)
-            fb_dict = fb_response.model_dump()
-            fb_dict["coach_name"] = fb.coach.full_name if fb.coach else None
-            fb_dict["replies"] = []
+            fb_dict = serialize_feedback(fb)
             feedback_map[fb.id] = fb_dict
         
         for fb in media.feedback:

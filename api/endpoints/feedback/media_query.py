@@ -1,33 +1,24 @@
 from fastapi import APIRouter, status, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from db.session import get_db
-from schemas.feedbackSchema import (
-    MediaUploadCreate, MediaUploadResponse,
-    FeedbackCreate, FeedbackUpdate, FeedbackResponse,
-    MediaWithFeedbackResponse
-)
-from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
-
+from schemas.feedbackSchema import MediaUploadResponse
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
 from models.media_upload import MediaUpload
-from models.feedback import Feedback
-from models.assigned_workout import AssignedWorkout
-from models.user import User, UserRole
 from typing import Optional
 from uuid import UUID
 from api.endpoints.helper_methods import verify_coach_role, verify_coach_client_relationship
 
-router = APIRouter()
+router = APIRouter(prefix="/media")
 
 
-@router.get("/media/my-uploads", response_model=StandardResponse)
+@router.get("/my-uploads", response_model=StandardResponse)
 async def get_my_media_uploads(
     assigned_workout_id: Optional[UUID] = Query(None, description="Filter by assigned workout"),
     exercise_id: Optional[UUID] = Query(None, description="Filter by exercise"),
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get all media uploads for the authenticated client.
@@ -38,7 +29,7 @@ async def get_my_media_uploads(
     try:
         client_user_id = UUID(str(current_user.get("user_id")))
         
-        query = db.query(MediaUpload).filter(
+        query = select(MediaUpload).filter(
             MediaUpload.client_user_id == client_user_id
         )
         
@@ -47,7 +38,9 @@ async def get_my_media_uploads(
         if exercise_id:
             query = query.filter(MediaUpload.exercise_id == exercise_id)
         
-        media_uploads = query.order_by(MediaUpload.created_at.desc()).all()
+        query = query.order_by(MediaUpload.created_at.desc())
+        result = await db.execute(query)
+        media_uploads = result.scalars().all()
         
         uploads = [MediaUploadResponse.model_validate(mu).model_dump() for mu in media_uploads]
         
@@ -63,13 +56,13 @@ async def get_my_media_uploads(
         )
 
 
-@router.get("/media/client/{client_id}", response_model=StandardResponse)
+@router.get("/client/{client_id}", response_model=StandardResponse)
 async def get_client_media_uploads(
     client_id: UUID,
     assigned_workout_id: Optional[UUID] = Query(None, description="Filter by assigned workout"),
     exercise_id: Optional[UUID] = Query(None, description="Filter by exercise"),
     current_user: dict = Depends(verify_user_token),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get media uploads from a specific client (Coach only).
@@ -81,12 +74,12 @@ async def get_client_media_uploads(
     """
     try:
         coach_user_id = UUID(str(current_user.get("user_id")))
-        verify_coach_role(coach_user_id, db)
+        await verify_coach_role(coach_user_id, db)
         
         # Verify coach-client relationship
-        verify_coach_client_relationship(coach_user_id, client_id, db)
+        await verify_coach_client_relationship(coach_user_id, client_id, db)
         
-        query = db.query(MediaUpload).filter(
+        query = select(MediaUpload).filter(
             MediaUpload.client_user_id == client_id
         )
         
@@ -95,7 +88,9 @@ async def get_client_media_uploads(
         if exercise_id:
             query = query.filter(MediaUpload.exercise_id == exercise_id)
         
-        media_uploads = query.order_by(MediaUpload.created_at.desc()).all()
+        query = query.order_by(MediaUpload.created_at.desc())
+        result = await db.execute(query)
+        media_uploads = result.scalars().all()
         
         uploads = [MediaUploadResponse.model_validate(mu).model_dump() for mu in media_uploads]
         
