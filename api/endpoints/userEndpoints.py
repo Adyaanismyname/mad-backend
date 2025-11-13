@@ -88,18 +88,20 @@ async def login_user(user_credentials : UserLogin, db : AsyncSession = Depends(g
         500 Internal Server Error: If an unexpected error occurs
     """
     try:
-        result = await db.execute(select(User).where(User.username == user_credentials.username))
+        result = await db.execute(select(User).where(User.email == user_credentials.email))
         user = result.scalar_one_or_none()
         if not user or not user.verify_password(user_credentials.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password"
+                detail="Invalid email or password"
             )  
         # Create JWT token
-        token_data = UserTokenData(username=user.username, user_id=user.id)
+        token_data = UserTokenData(username=None, user_id=str(user.id))
         access_token = create_access_token(data=token_data.model_dump())
 
         return StandardResponse(data={"access_token": access_token}, message="Login successful")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

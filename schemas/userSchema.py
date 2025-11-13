@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, field_serializer
+from uuid import UUID
 
 class UserLogin(BaseModel):
     """
@@ -19,8 +20,13 @@ class UserTokenData(BaseModel):
     Used internally for authentication and authorization.
     """
     username: str | None = None
-    user_id: int | None = None
+    user_id: UUID | None = None
     is_admin: bool | None = None
+    
+    @field_serializer('user_id')
+    def serialize_user_id(self, user_id: UUID | None, _info):
+        """Convert UUID to string for JSON serialization."""
+        return str(user_id) if user_id else None
 
 
 class UserFetch(BaseModel):
@@ -32,7 +38,7 @@ class UserFetch(BaseModel):
     
     Used by administrators to fetch detailed user information by ID.
     """
-    id: int
+    id: UUID
 
 
 class UserResponse(BaseModel):
@@ -44,9 +50,9 @@ class UserResponse(BaseModel):
     """
     model_config = ConfigDict(from_attributes=True)
     
-    id: int
-    username: str
+    id: UUID
     email: EmailStr
+    full_name: str
 
 
 class SignupRequest(BaseModel):

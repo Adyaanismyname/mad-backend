@@ -42,9 +42,13 @@ async def login_user(user_credentials: UserLogin, db: AsyncSession = Depends(get
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )  
-        # Create JWT token
-        token_data = UserTokenData(username=None, user_id=user.id)
-        access_token = create_access_token(data=token_data.model_dump())
+        # Create JWT token - convert UUID to string
+        token_data = {
+            "username": None,
+            "user_id": str(user.id),
+            "is_admin": False
+        }
+        access_token = create_access_token(data=token_data)
 
         return StandardResponse(data={"access_token": access_token}, message="Login successful")
     except Exception as e:
@@ -123,8 +127,13 @@ async def verify_otp(payload: VerifyOTP, db: AsyncSession = Depends(get_db)):
         await db.commit()
 
         user = token_row.user
-        token_data = UserTokenData(username=getattr(user, 'username', None), user_id=user.id)
-        access_token = create_access_token(data=token_data.model_dump())
+        # Create JWT token - convert UUID to string
+        token_data = {
+            "username": None,
+            "user_id": str(user.id),
+            "is_admin": False
+        }
+        access_token = create_access_token(data=token_data)
 
         return StandardResponse(data={"access_token": access_token}, message="Verification successful")
     except HTTPException:

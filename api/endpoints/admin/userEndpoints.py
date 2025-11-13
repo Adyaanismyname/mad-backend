@@ -7,6 +7,7 @@ from schemas.userSchema import UserResponse, UserFetch
 from core.auth import verify_admin_token
 from models.user import User
 from schemas.core import StandardResponse
+from uuid import UUID
 
 router = APIRouter()
 
@@ -38,7 +39,7 @@ async def get_all_users(admin: dict = Depends(verify_admin_token), db: AsyncSess
 
 
 @router.get("/getUser/{user_id}", response_model=StandardResponse)
-async def get_user(user_id: int, admin: dict = Depends(verify_admin_token), db: AsyncSession = Depends(get_db)):
+async def get_user(user_id: UUID, admin: dict = Depends(verify_admin_token), db: AsyncSession = Depends(get_db)):
     """
     Get specific user metadata by ID (Admin only).
     
