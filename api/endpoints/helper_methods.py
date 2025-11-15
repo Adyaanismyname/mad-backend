@@ -1,11 +1,48 @@
-from fastapi import status, HTTPException
+from fastapi import status, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
 from models.user import User, UserRole
 from uuid import UUID
+from datetime import datetime, timezone
+from core.mailer import send_verification_email
+import random
 
 # ============= Helper Functions =============
+
+async def generate_and_send_otp(
+    user: User, 
+    db: AsyncSession, 
+    background_tasks: BackgroundTasks,
+    otp_validity_minutes: int = 10
+) -> str:
+    """
+    Generate OTP, save to user, and send email.
+    
+    Args:
+        user: User model instance
+        db: Database session
+        background_tasks: FastAPI background tasks
+        otp_validity_minutes: OTP validity duration in minutes
+    
+    Returns:
+        str: The generated OTP
+    """
+    # Generate 6-digit OTP
+    otp = f"{random.randint(0, 999999):06d}"
+    
+    # Update user with OTP
+    user.otp = otp
+    user.otp_created_at = datetime.now(timezone.utc)
+    
+    await db.commit()
+    await db.refresh(user)
+    
+    # Send email in background
+    background_tasks.add_task(send_verification_email, user.email, otp, otp_validity_minutes)
+    
+    return otp
+
 
 async def verify_coach_role(user_id: UUID, db: AsyncSession):
     """Verify that user has coach role."""

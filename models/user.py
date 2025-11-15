@@ -29,6 +29,9 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String)
     phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     profile_picture_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    otp: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    otp_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_activated: Mapped[bool] = mapped_column(default=False)
 
     
     # Timestamps

@@ -75,7 +75,7 @@ Check if the API is running.
 ### 1. User Login
 **POST** `/users/login`
 
-Authenticate a user and receive a JWT token.
+Authenticate a user and receive a JWT token. If the account is not activated, an OTP will be automatically sent for activation.
 
 **Authentication:** None required
 
@@ -87,7 +87,7 @@ Authenticate a user and receive a JWT token.
 }
 ```
 
-**Response:**
+**Response (Activated Account):**
 ```json
 {
     "data": {
@@ -97,17 +97,33 @@ Authenticate a user and receive a JWT token.
 }
 ```
 
+**Response (Unactivated Account):**
+```json
+{
+    "data": {
+        "requires_activation": true
+    },
+    "message": "Account not activated. Verification OTP sent to email"
+}
+```
+
 **Status Codes:**
-- `200 OK`: Login successful
+- `200 OK`: Login successful (activated) or OTP sent (unactivated)
 - `401 Unauthorized`: Invalid email or password
 - `500 Internal Server Error`: Server error
+
+**Notes:**
+- New accounts start as unactivated and require OTP verification
+- If account is not activated, OTP is automatically sent to the registered email
+- OTP expires in 10 minutes
+- After successful OTP verification, account is activated
 
 ---
 
 ### 2. User Signup
 **POST** `/users/signup`
 
-Register a new user account and send verification OTP to email.
+Register a new user account and send verification OTP to email. Account will be created but not activated until OTP is verified.
 
 **Authentication:** None required
 
@@ -129,20 +145,23 @@ Register a new user account and send verification OTP to email.
 ```
 
 **Status Codes:**
-- `200 OK`: OTP sent successfully
+- `200 OK`: Account created and OTP sent successfully
 - `400 Bad Request`: Email already registered
 - `500 Internal Server Error`: Server error
 
 **Notes:**
+- User account is created with `is_activated = false`
+- OTP is stored directly on the user record
 - OTP expires in 10 minutes
 - Email is sent in background
+- User must verify OTP to activate account and login
 
 ---
 
 ### 3. Verify OTP
 **POST** `/users/verify-otp`
 
-Verify the OTP sent to user's email and receive JWT token.
+Verify the OTP sent to user's email, activate the account, and receive JWT token.
 
 **Authentication:** None required
 
@@ -160,21 +179,63 @@ Verify the OTP sent to user's email and receive JWT token.
     "data": {
         "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
     },
-    "message": "Verification successful"
+    "message": "Account activated successfully"
 }
 ```
 
 **Status Codes:**
-- `200 OK`: Verification successful
-- `400 Bad Request`: Invalid or used token, or token expired
+- `200 OK`: Account activated and JWT token returned
+- `400 Bad Request`: User not found, invalid OTP, expired OTP, or missing OTP
 - `500 Internal Server Error`: Server error
+
+**Error Messages:**
+- `"User not found"`: Email doesn't exist in the system
+- `"No OTP found for this user"`: No OTP has been generated for this user
+- `"Invalid OTP"`: The provided OTP doesn't match
+- `"OTP timestamp not found"`: OTP creation timestamp is missing
+- `"OTP has expired"`: OTP is older than 10 minutes
+
+**Notes:**
+- OTP expires after 10 minutes from generation
+- After successful verification:
+  - User account is activated (`is_activated = true`)
+  - OTP and timestamp are cleared from user record
+  - JWT token is returned for immediate login
+- Each OTP can only be used once
+- Use this endpoint after signup or when login returns `requires_activation: true`
+
+---
+
+### User Authentication Flow
+
+**New User Registration:**
+1. User calls `POST /users/signup` with email, password, and full_name
+2. Account is created with `is_activated = false`
+3. 6-digit OTP is generated and sent to user's email
+4. User receives OTP via email (valid for 10 minutes)
+5. User calls `POST /users/verify-otp` with email and OTP
+6. Account is activated and JWT token is returned
+7. User can now login normally
+
+**Existing User Login (Activated):**
+1. User calls `POST /users/login` with email and password
+2. If account is activated, JWT token is returned
+3. User can access protected endpoints
+
+**Existing User Login (Not Activated):**
+1. User calls `POST /users/login` with email and password
+2. System detects account is not activated
+3. New OTP is automatically generated and sent to email
+4. Response includes `requires_activation: true` flag
+5. User calls `POST /users/verify-otp` with email and new OTP
+6. Account is activated and JWT token is returned
 
 ---
 
 ## Admin User Endpoints
 
 ### 1. Get All Users
-**GET** `/admin/users/getAllUsers`
+**GET** `/users/getAllUsers`
 
 Retrieve all users from the database (Admin only).
 
@@ -185,14 +246,22 @@ Retrieve all users from the database (Admin only).
 {
     "data": [
         {
-            "id": 1,
-            "username": "johndoe",
-            "email": "john@example.com"
+            "id": "123e4567-e89b-12d3-a456-426614174000",
+            "email": "john@example.com",
+            "full_name": "John Doe",
+            "role": "client",
+            "is_activated": true,
+            "created_at": "2025-11-12T10:00:00",
+            "updated_at": "2025-11-12T10:00:00"
         },
         {
-            "id": 2,
-            "username": "janedoe",
-            "email": "jane@example.com"
+            "id": "123e4567-e89b-12d3-a456-426614174001",
+            "email": "jane@example.com",
+            "full_name": "Jane Doe",
+            "role": "coach",
+            "is_activated": true,
+            "created_at": "2025-11-12T09:00:00",
+            "updated_at": "2025-11-12T09:00:00"
         }
     ],
     "message": "Users retrieved successfully"
@@ -206,25 +275,35 @@ Retrieve all users from the database (Admin only).
 - `503 Service Unavailable`: Database connection failed
 - `500 Internal Server Error`: Server error
 
+**Notes:**
+- Returns all users with their activation status
+- User IDs are UUIDs, not integers
+
 ---
 
 ### 2. Get User by ID
-**GET** `/admin/users/getUser/{user_id}`
+**GET** `/users/getUser/{user_id}`
 
 Get specific user metadata by ID (Admin only).
 
 **Authentication:** Required (Admin)
 
 **Path Parameters:**
-- `user_id` (integer): The ID of the user to retrieve
+- `user_id` (UUID): The ID of the user to retrieve
 
 **Response:**
 ```json
 {
     "data": {
-        "id": 1,
-        "username": "johndoe",
-        "email": "john@example.com"
+        "id": "123e4567-e89b-12d3-a456-426614174000",
+        "email": "john@example.com",
+        "full_name": "John Doe",
+        "role": "client",
+        "is_activated": true,
+        "phone_number": "+1234567890",
+        "profile_picture_url": "https://example.com/profile.jpg",
+        "created_at": "2025-11-12T10:00:00",
+        "updated_at": "2025-11-12T10:00:00"
     },
     "message": "User retrieved successfully"
 }
@@ -237,6 +316,10 @@ Get specific user metadata by ID (Admin only).
 - `404 Not Found`: User not found
 - `503 Service Unavailable`: Database connection failed
 - `500 Internal Server Error`: Server error
+
+**Notes:**
+- `user_id` must be a valid UUID
+- Returns complete user profile including activation status
 
 ---
 

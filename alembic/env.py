@@ -9,7 +9,14 @@ from alembic import context
 
 # Import Base and models for autogenerate support
 from db.base import Base
-from models import user  # noqa: F401 - Import models to register them with Base
+# Import all models to register them with Base for autogenerate
+from models import (  # noqa: F401
+    user, coach_profile, client_profile, coach_client_relationship,
+    exercise, workout, workout_exercise, assigned_workout,
+    exercise_progress, media_upload, feedback, progress_tracking,
+    password_reset_token, email_verification_token, refresh_token,
+    pose_analysis
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -43,7 +50,8 @@ def run_migrations_offline() -> None:
 
     """
     # url = config.get_main_option("sqlalchemy.url")
-    url = settings.DATABASE_URL
+    # Convert async URL to sync for Alembic
+    url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
     print("URL" , url)
     context.configure(
         url=url,
@@ -64,7 +72,9 @@ def run_migrations_online() -> None:
 
     """
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    # Convert async URL to sync for Alembic
+    sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    configuration["sqlalchemy.url"] = sync_url
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
@@ -83,5 +93,6 @@ def run_migrations_online() -> None:
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    print("URL" , settings.DATABASE_URL)
+    sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    print("URL" , sync_url)
     run_migrations_online()
