@@ -20,6 +20,7 @@ class MediaUpload(Base):
     
     # Media Fields
     media_url: Mapped[str] = mapped_column(Text)
+    s3_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # S3 object key for file operations
     media_type: Mapped[str] = mapped_column(String)  # e.g., "video", "image"
     status: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # e.g., "processing", "ready", "failed"
     
