@@ -4,7 +4,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy import select
 from db.session import get_db
 from schemas.userSchema import UserLogin, UserTokenData, SignupRequest, VerifyOTP, UserResponse
-from core.auth import create_access_token, verify_admin_token
+from core.auth import create_access_token, verify_admin_token, verify_user_token
 from models.user import User
 from schemas.core import StandardResponse
 from datetime import datetime, timedelta, timezone
@@ -62,7 +62,15 @@ async def login_user(
         }
         access_token = create_access_token(data=token_data)
 
-        return StandardResponse(data={"access_token": access_token}, message="Login successful")
+        # Return user data along with token
+        user_data = UserResponse.model_validate(user).model_dump()
+        return StandardResponse(
+            data={
+                "access_token": access_token,
+                "user": user_data
+            }, 
+            message="Login successful"
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -148,11 +156,55 @@ async def verify_otp(payload: VerifyOTP, db: AsyncSession = Depends(get_db)):
         }
         access_token = create_access_token(data=token_data)
 
-        return StandardResponse(data={"access_token": access_token}, message="Account activated successfully")
+        # Return user data along with token
+        user_data = UserResponse.model_validate(user).model_dump()
+        return StandardResponse(
+            data={
+                "access_token": access_token,
+                "user": user_data
+            }, 
+            message="Account activated successfully"
+        )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/profile", response_model=StandardResponse)
+async def get_my_profile(user_payload: dict = Depends(verify_user_token), db: AsyncSession = Depends(get_db)):
+    """
+    Get the authenticated user's profile information.
+    
+    Returns: {"data": {user_data}, "message": "Profile retrieved successfully"}
+    Requires: Valid JWT token in Authorization header
+    Errors: 401 (unauthorized), 404 (user not found), 503 (db error), 500 (server error)
+    """
+    try:
+        user_id = UUID(user_payload.get("user_id"))
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        user_data = UserResponse.model_validate(user).model_dump()
+        return StandardResponse(data=user_data, message="Profile retrieved successfully")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except OperationalError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection failed"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )
 
 
 @router.get("/getAllUsers", response_model=StandardResponse)
