@@ -15,13 +15,14 @@ http://localhost:8000
 3. [Health Check](#health-check)
 4. [User Endpoints](#user-endpoints)
 5. [Admin User Endpoints](#admin-user-endpoints)
-6. [Workout Endpoints](#workout-endpoints)
-7. [Workout Assignment Endpoints](#workout-assignment-endpoints)
-8. [Workout Exercise Management](#workout-exercise-management)
-9. [Media Upload Endpoints](#media-upload-endpoints)
-10. [Media Query Endpoints](#media-query-endpoints)
-11. [Media Management Endpoints](#media-management-endpoints)
-12. [Feedback Endpoints](#feedback-endpoints)
+6. [Coach-Client Relationship Endpoints](#coach-client-relationship-endpoints)
+7. [Workout Endpoints](#workout-endpoints)
+8. [Workout Assignment Endpoints](#workout-assignment-endpoints)
+9. [Workout Exercise Management](#workout-exercise-management)
+10. [Media Upload Endpoints](#media-upload-endpoints)
+11. [Media Query Endpoints](#media-query-endpoints)
+12. [Media Management Endpoints](#media-management-endpoints)
+13. [Feedback Endpoints](#feedback-endpoints)
 
 ---
 
@@ -39,6 +40,30 @@ Authorization: Bearer <your_jwt_token>
 - **COACH**: Can create workouts, assign workouts, provide feedback
 - **BOTH**: Has both client and coach privileges
 - **ADMIN**: Has administrative privileges
+
+### JWT Token Structure
+
+JWT tokens contain comprehensive user information for efficient authorization and reduced database queries:
+
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "user@example.com",
+  "full_name": "John Doe",
+  "role": "client",
+  "is_activated": true,
+  "exp": 1732140000
+}
+```
+
+**Token Fields:**
+
+- `user_id`: User's unique identifier
+- `email`: User's email address
+- `full_name`: User's display name
+- `role`: User's role ("client", "coach", or "both")
+- `is_activated`: Account activation status
+- `exp`: Token expiration timestamp
 
 ---
 
@@ -149,9 +174,17 @@ Register a new user account and send verification OTP to email. Account will be 
 {
   "email": "newuser@example.com",
   "password": "securepassword123",
-  "full_name": "John Doe"
+  "full_name": "John Doe",
+  "role": "client"
 }
 ```
+
+**Fields:**
+
+- `email`: User's email address (required)
+- `password`: User's password (required)
+- `full_name`: User's full name (optional)
+- `role`: User's role - "client", "coach", or "both" (optional, defaults to "client")
 
 **Response:**
 
@@ -229,6 +262,45 @@ Verify the OTP sent to user's email, activate the account, and receive JWT token
   - JWT token is returned for immediate login
 - Each OTP can only be used once
 - Use this endpoint after signup or when login returns `requires_activation: true`
+
+---
+
+### 4. Get Current User Data
+
+**GET** `/users/me`
+
+Get the authenticated user's profile data by decoding their JWT token.
+
+**Authentication:** Required (JWT token in Authorization header)
+
+**Request:** No body required
+
+**Response:**
+
+```json
+{
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "user@example.com",
+    "full_name": "John Doe"
+  },
+  "message": "User data retrieved successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: User data retrieved successfully
+- `401 Unauthorized`: Missing or invalid JWT token
+- `404 Not Found`: User not found in database
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Automatically extracts user ID from JWT token
+- Returns basic user profile information
+- Useful for frontend to display current user info
+- No need to pass user_id as parameter
 
 ---
 
@@ -358,6 +430,382 @@ Get specific user metadata by ID (Admin only).
 
 - `user_id` must be a valid UUID
 - Returns complete user profile including activation status
+
+---
+
+## Coach-Client Relationship Endpoints
+
+These endpoints manage the connections between coaches and clients. A relationship must be ACTIVE before a coach can assign workouts to a client.
+
+### Relationship Status Flow
+
+```
+PENDING → ACTIVE (accepted)
+PENDING → TERMINATED (rejected)
+ACTIVE → PAUSED
+ACTIVE → TERMINATED
+PAUSED → ACTIVE (reactivated)
+PAUSED → TERMINATED
+```
+
+---
+
+### 1. Create Relationship
+
+**POST** `/relationships`
+
+Create a coach-client relationship. Can be initiated by either party.
+
+**Authentication:** Required
+
+**Scenarios:**
+
+1. **Coach invites client**: Provide `client_user_id`
+2. **Client requests coach**: Provide `coach_user_id`
+
+**Request Body (Coach inviting client):**
+
+```json
+{
+  "client_user_id": "123e4567-e89b-12d3-a456-426614174001"
+}
+```
+
+**Request Body (Client requesting coach):**
+
+```json
+{
+  "coach_user_id": "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174002",
+    "coach_user_id": "123e4567-e89b-12d3-a456-426614174000",
+    "client_user_id": "123e4567-e89b-12d3-a456-426614174001",
+    "status": "pending",
+    "created_at": "2025-11-20T10:00:00",
+    "updated_at": "2025-11-20T10:00:00"
+  },
+  "message": "Relationship request created successfully"
+}
+```
+
+**Status Codes:**
+
+- `201 Created`: Relationship created successfully
+- `400 Bad Request`: Invalid request data
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: User doesn't have required role (e.g., not a coach)
+- `404 Not Found`: Specified user not found
+- `409 Conflict`: Relationship already exists
+- `422 Unprocessable Entity`: Validation error
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Only one of `coach_user_id` or `client_user_id` should be provided
+- Relationship starts with `pending` status
+- The recipient must accept to make it `active`
+
+---
+
+### 2. Get My Relationships
+
+**GET** `/relationships`
+
+Get all relationships for the current user (as coach or client).
+
+**Authentication:** Required
+
+**Query Parameters:**
+
+- `status_filter` (optional): Filter by status (`pending`, `active`, `paused`, `terminated`)
+
+**Example Request:**
+
+```
+GET /relationships?status_filter=active
+```
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174002",
+      "coach_user_id": "123e4567-e89b-12d3-a456-426614174000",
+      "coach_email": "coach@example.com",
+      "coach_name": "John Coach",
+      "client_user_id": "123e4567-e89b-12d3-a456-426614174001",
+      "client_email": "client@example.com",
+      "client_name": "Jane Client",
+      "status": "active",
+      "created_at": "2025-11-20T10:00:00",
+      "updated_at": "2025-11-20T10:15:00"
+    }
+  ],
+  "message": "Relationships retrieved successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Relationships retrieved successfully
+- `401 Unauthorized`: Not authenticated
+- `422 Unprocessable Entity`: Invalid status filter
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Returns relationships where user is either coach or client
+- Includes user details for both parties
+- Without `status_filter`, returns all statuses
+
+---
+
+### 3. Get Relationship Details
+
+**GET** `/relationships/{relationship_id}`
+
+Get details of a specific relationship.
+
+**Authentication:** Required
+
+**Path Parameters:**
+
+- `relationship_id` (UUID): The ID of the relationship
+
+**Response:**
+
+```json
+{
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174002",
+    "coach_user_id": "123e4567-e89b-12d3-a456-426614174000",
+    "coach_email": "coach@example.com",
+    "coach_name": "John Coach",
+    "client_user_id": "123e4567-e89b-12d3-a456-426614174001",
+    "client_email": "client@example.com",
+    "client_name": "Jane Client",
+    "status": "active",
+    "created_at": "2025-11-20T10:00:00",
+    "updated_at": "2025-11-20T10:15:00"
+  },
+  "message": "Relationship retrieved successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Relationship retrieved successfully
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: User not part of this relationship
+- `404 Not Found`: Relationship not found
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- User must be either the coach or client in the relationship
+
+---
+
+### 4. Update Relationship Status
+
+**PUT** `/relationships/{relationship_id}`
+
+Update relationship status (Accept, Reject, Pause, Reactivate, Terminate).
+
+**Authentication:** Required
+
+**Path Parameters:**
+
+- `relationship_id` (UUID): The ID of the relationship
+
+**Request Body:**
+
+```json
+{
+  "status": "active"
+}
+```
+
+**Valid Status Values:**
+
+- `active`: Accept a pending relationship or reactivate a paused one
+- `paused`: Pause an active relationship
+- `terminated`: Reject a pending relationship or terminate active/paused ones
+
+**Response:**
+
+```json
+{
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174002",
+    "coach_user_id": "123e4567-e89b-12d3-a456-426614174000",
+    "client_user_id": "123e4567-e89b-12d3-a456-426614174001",
+    "status": "active",
+    "created_at": "2025-11-20T10:00:00",
+    "updated_at": "2025-11-20T10:15:00"
+  },
+  "message": "Relationship accepted"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Relationship updated successfully
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: User not authorized to update this relationship
+- `404 Not Found`: Relationship not found
+- `422 Unprocessable Entity`: Invalid status transition
+- `500 Internal Server Error`: Server error
+
+**Valid Status Transitions:**
+
+- `pending` → `active` (accept) or `terminated` (reject)
+- `active` → `paused` or `terminated`
+- `paused` → `active` (reactivate) or `terminated`
+- `terminated` → Cannot be changed
+
+**Notes:**
+
+- User must be part of the relationship
+- Terminated relationships cannot be modified
+
+---
+
+### 5. Delete Relationship
+
+**DELETE** `/relationships/{relationship_id}`
+
+Permanently delete a relationship (hard delete).
+
+**Authentication:** Required
+
+**Path Parameters:**
+
+- `relationship_id` (UUID): The ID of the relationship
+
+**Response:**
+
+```json
+{
+  "data": {},
+  "message": "Relationship deleted successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Relationship deleted successfully
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: User not authorized to delete this relationship
+- `404 Not Found`: Relationship not found
+- `422 Unprocessable Entity`: Cannot delete active/paused relationship
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Can only delete `pending` or `terminated` relationships
+- For `active`/`paused` relationships, must terminate first
+- Either party can delete
+- This is a permanent action
+
+---
+
+### 6. Get Available Coaches
+
+**GET** `/relationships/coaches/available`
+
+Get list of coaches available to connect with (for clients).
+
+**Authentication:** Required
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "email": "coach1@example.com",
+      "full_name": "John Coach",
+      "role": "coach"
+    },
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174003",
+      "email": "coach2@example.com",
+      "full_name": "Jane Trainer",
+      "role": "both"
+    }
+  ],
+  "message": "Available coaches retrieved successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Coaches retrieved successfully
+- `401 Unauthorized`: Not authenticated
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Returns coaches not already connected to current user
+- Excludes coaches with existing relationships (any status)
+- Useful for client UI to browse coaches
+
+---
+
+### 7. Get Available Clients
+
+**GET** `/relationships/clients/available`
+
+Get list of clients available to invite (for coaches).
+
+**Authentication:** Required (Coach only)
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174001",
+      "email": "client1@example.com",
+      "full_name": "Alice Client",
+      "role": "client"
+    },
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174004",
+      "email": "user@example.com",
+      "full_name": "Bob User",
+      "role": "both"
+    }
+  ],
+  "message": "Available clients retrieved successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Clients retrieved successfully
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: User is not a coach
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Only coaches can access this endpoint
+- Returns users not already connected to current coach
+- Excludes users with existing relationships (any status)
+- Useful for coach UI to browse and invite clients
 
 ---
 
@@ -1179,6 +1627,171 @@ Upload media (video/image) for an exercise (Client only).
 
 ---
 
+## S3 Storage: Uploading & Downloading Media (Recommended)
+
+This section documents how the frontend should upload and download large media files (videos/images) using AWS S3. The recommended approach is direct-to-S3 uploads using presigned URLs (the backend returns a temporary URL the client can PUT to). This avoids proxying large files through your backend.
+
+Important: The backend must still be notified of the uploaded file so it can create a `MediaUpload` record referencing the S3 object (key/URL) and link it to the relevant `assigned_workout_id` / `exercise_id`.
+
+Environment variables (backend):
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+- `AWS_S3_BUCKET`
+- `S3_PRESIGN_EXPIRES` (seconds, optional, default e.g. 900)
+
+IAM permissions required for the backend credentials that generate presigned URLs:
+
+- `s3:PutObject` for uploads
+- `s3:GetObject` for downloads (if generating presigned GET URLs)
+- Optionally `s3:ListBucket` / `s3:DeleteObject` depending on features
+
+Bucket CORS (example) — required to allow browser PUT/POST directly to S3:
+
+```xml
+<CORSConfiguration>
+  <CORSRule>
+    <AllowedOrigin>https://your-frontend.example.com</AllowedOrigin>
+    <AllowedMethod>PUT</AllowedMethod>
+    <AllowedMethod>POST</AllowedMethod>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedHeader>*</AllowedHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <MaxAgeSeconds>3000</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>
+```
+
+Flow A — Direct-to-S3 (Recommended)
+
+1. Frontend requests a presigned upload URL from the backend. Example endpoint you should call in the backend:
+
+- `POST /feedback/media/presign` (body includes `filename`, `content_type`, `media_type`, optional `assigned_workout_id`, `exercise_id`)
+
+Example request (get presigned URL):
+
+```bash
+curl -X POST "https://api.example.com/feedback/media/presign" \
+  -H "Authorization: Bearer <JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{"filename":"video.mp4","content_type":"video/mp4","media_type":"video","assigned_workout_id":"<uuid>","exercise_id":"<uuid>"}'
+```
+
+Example response (from backend):
+
+```json
+{
+  "data": {
+    "upload_url": "https://your-bucket.s3.amazonaws.com/object-key?X-Amz-Signature=...",
+    "object_key": "uploads/2025/11/15/<generated-key>.mp4",
+    "expires_in": 900
+  },
+  "message": "Presigned URL generated"
+}
+```
+
+2. Frontend uploads the file directly to S3 using the `upload_url` (PUT request). Preserve `Content-Type` header.
+
+Example upload (browser/fetch):
+
+```js
+await fetch(upload_url, {
+  method: "PUT",
+  headers: { "Content-Type": "video/mp4" },
+  body: file, // File object from input
+});
+```
+
+or curl:
+
+```bash
+curl -X PUT "<upload_url>" -H "Content-Type: video/mp4" --upload-file ./video.mp4
+```
+
+3. After successful upload (HTTP 200 or 201 from S3), notify your backend to create the media record (unless backend already created a pending record when returning the presign). This endpoint stores metadata and the S3 `object_key`/`url`.
+
+- `POST /feedback/media` (body: `object_key` or `media_url`, `assigned_workout_id`, `exercise_id`, `media_type`)
+
+Example register request:
+
+```bash
+curl -X POST "https://api.example.com/feedback/media" \
+  -H "Authorization: Bearer <JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{"object_key":"uploads/.../video.mp4","media_type":"video","assigned_workout_id":"<uuid>","exercise_id":"<uuid>"}'
+```
+
+The backend should respond with the `MediaUpload` resource (id, media_url, status)
+
+Flow B — Backend-proxied Upload (Not recommended for large files)
+
+1. Frontend sends a multipart/form-data POST to the backend: `POST /feedback/media/upload` with fields `file` (binary), `assigned_workout_id`, `exercise_id`, `media_type`.
+2. Backend receives file, uploads server-side to S3 (using the SDK), stores the `object_key` and returns the `MediaUpload` resource.
+
+Example proxy upload (curl):
+
+```bash
+curl -X POST "https://api.example.com/feedback/media/upload" \
+  -H "Authorization: Bearer <JWT>" \
+  -F "file=@./video.mp4;type=video/mp4" \
+  -F "media_type=video" \
+  -F "assigned_workout_id=<uuid>"
+```
+
+Notes about proxy uploads:
+
+- Easier to implement but causes heavy bandwidth and memory usage on your backend
+- Use only for small files or when direct-to-S3 is not possible
+
+Downloading / Streaming
+
+- The backend should _not_ expose raw S3 credentials. Use presigned GET URLs for temporary access to objects.
+- Example endpoint: `GET /feedback/media/{media_id}/download` returns a presigned GET URL or redirects to it.
+
+Example flow to download:
+
+1. Frontend GETs `https://api.example.com/feedback/media/{media_id}/download` with Authorization header.
+2. Backend generates a presigned GET URL (short expiration) and returns it in the response.
+3. Frontend uses that URL to download or stream the file directly from S3.
+
+Example response for presigned GET:
+
+```json
+{
+  "data": {
+    "download_url": "https://your-bucket.s3.amazonaws.com/object-key?X-Amz-Signature=...",
+    "expires_in": 300
+  },
+  "message": "Presigned download URL generated"
+}
+```
+
+Security considerations
+
+- Limit presigned URL expiration to a short duration (e.g., 5–15 minutes)
+- Ensure presigned upload keys are unpredictable (include user id / timestamp / random UUID)
+- Validate file type and size on backend when the upload is registered (don't rely solely on client or S3 headers)
+- Enforce S3 bucket policies to prevent public object ACLs unless intentional
+
+Frontend checklist
+
+- Request presigned upload URL from backend before uploading
+- Use the exact `Content-Type` when uploading to S3
+- After upload, call backend to register the `object_key` (unless backend already did it when issuing presign)
+- To download, ask backend for a presigned GET URL and use that URL to fetch the file
+
+---
+
+Additions to existing media endpoints in this doc:
+
+- `POST /feedback/media/presign` — Generate presigned upload URL (recommended)
+- `POST /feedback/media` — Create/register media record (object_key or media_url)
+- `POST /feedback/media/upload` — (optional) Proxy upload endpoint for multipart/form-data
+- `GET /feedback/media/{media_id}/download` — Return presigned GET URL for download
+
+Implementors can adapt names/paths to match the actual backend routes; the above are recommended conventions that map directly to the existing `feedback/media` namespace described earlier.
+
 ## Media Query Endpoints
 
 ### 1. Get My Media Uploads
@@ -1706,6 +2319,13 @@ DateTimes use ISO 8601 format with timezone:
 
 - `video`
 - `image`
+
+### Relationship Status Enum
+
+- `pending`: Invitation/request sent, awaiting acceptance
+- `active`: Relationship accepted, coach can assign workouts
+- `paused`: Temporarily paused, can be reactivated
+- `terminated`: Relationship ended, cannot be reactivated
 
 ---
 

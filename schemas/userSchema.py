@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, ConfigDict, field_serializer
 from uuid import UUID
+from models.user import UserRole
 
 class UserLogin(BaseModel):
     """
@@ -19,9 +20,11 @@ class UserTokenData(BaseModel):
     Contains user information extracted from decoded JWT tokens.
     Used internally for authentication and authorization.
     """
-    username: str | None = None
     user_id: UUID | None = None
-    is_admin: bool | None = None
+    email: str | None = None
+    full_name: str | None = None
+    role: str | None = None  # "coach", "client", or "both"
+    is_activated: bool | None = None
     
     @field_serializer('user_id')
     def serialize_user_id(self, user_id: UUID | None, _info):
@@ -53,6 +56,7 @@ class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
     full_name: str
+    role: UserRole
 
 
 class SignupRequest(BaseModel):
@@ -62,6 +66,7 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str | None = None
+    role: UserRole = UserRole.CLIENT
 
 
 class VerifyOTP(BaseModel):

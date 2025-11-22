@@ -43,4 +43,5 @@ dependencies = [
     "faker>=37.11.0",
     "factory-boy>=3.3.3",
     "pytest-env>=1.2.0",
+    "boto3>=1.41.0",
 ]

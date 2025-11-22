@@ -4,7 +4,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy import select
 from db.session import get_db
 from schemas.userSchema import UserLogin, UserTokenData, SignupRequest, VerifyOTP, UserResponse
-from core.auth import create_access_token, verify_admin_token
+from core.auth import create_access_token, verify_admin_token, verify_user_token
 from models.user import User
 from schemas.core import StandardResponse
 from datetime import datetime, timedelta, timezone
@@ -54,11 +54,13 @@ async def login_user(
                 message="Account not activated. Verification OTP sent to email"
             )
             
-        # Create JWT token - convert UUID to string
+        # Create JWT token with comprehensive user data
         token_data = {
-            "username": None,
             "user_id": str(user.id),
-            "is_admin": False
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role.value,
+            "is_activated": user.is_activated
         }
         access_token = create_access_token(data=token_data)
 
@@ -89,6 +91,7 @@ async def signup_user(payload: SignupRequest, background_tasks: BackgroundTasks,
         user = User()
         user.email = payload.email
         user.full_name = payload.full_name or ""
+        user.role = payload.role
         user.set_password(payload.password)
         
         db.add(user)
@@ -140,11 +143,13 @@ async def verify_otp(payload: VerifyOTP, db: AsyncSession = Depends(get_db)):
         user.otp_created_at = None
         await db.commit()
 
-        # Create JWT token - convert UUID to string
+        # Create JWT token with comprehensive user data
         token_data = {
-            "username": None,
             "user_id": str(user.id),
-            "is_admin": False
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role.value,
+            "is_activated": user.is_activated
         }
         access_token = create_access_token(data=token_data)
 
@@ -153,6 +158,42 @@ async def verify_otp(payload: VerifyOTP, db: AsyncSession = Depends(get_db)):
         raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/me", response_model=StandardResponse)
+async def get_current_user(
+    current_user: dict = Depends(verify_user_token), 
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get current authenticated user's data from JWT token.
+    
+    Decodes the JWT token and returns the user's profile information.
+    
+    Returns: {"data": {user_data}, "message": "User data retrieved successfully"}
+    Errors: 401 (unauthorized), 404 (user not found), 500 (server error)
+    """
+    try:
+        user_id = UUID(str(current_user.get("user_id")))
+        
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        user_data = UserResponse.model_validate(user).model_dump()
+        return StandardResponse(data=user_data, message="User data retrieved successfully")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )
 
 
 @router.get("/getAllUsers", response_model=StandardResponse)

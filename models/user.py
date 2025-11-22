@@ -15,6 +15,8 @@ class UserRole(enum.Enum):
     COACH = "coach"
     CLIENT = "client"
     BOTH = "both"
+    
+
 
 class User(Base):
     __tablename__ = "users"

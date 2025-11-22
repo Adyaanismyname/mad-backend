@@ -167,7 +167,9 @@ def coach_token(coach_user) -> str:
     token_data = {
         "user_id": str(coach_user.id),
         "email": coach_user.email,
-        "is_admin": False
+        "full_name": coach_user.full_name,
+        "role": coach_user.role.value,
+        "is_activated": coach_user.is_activated
     }
     return create_access_token(data=token_data)
 
@@ -178,7 +180,9 @@ def client_token(client_user) -> str:
     token_data = {
         "user_id": str(client_user.id),
         "email": client_user.email,
-        "is_admin": False
+        "full_name": client_user.full_name,
+        "role": client_user.role.value,
+        "is_activated": client_user.is_activated
     }
     return create_access_token(data=token_data)
 
@@ -189,7 +193,9 @@ def another_client_token(another_client_user) -> str:
     token_data = {
         "user_id": str(another_client_user.id),
         "email": another_client_user.email,
-        "is_admin": False
+        "full_name": another_client_user.full_name,
+        "role": another_client_user.role.value,
+        "is_activated": another_client_user.is_activated
     }
     return create_access_token(data=token_data)
 
@@ -200,7 +206,9 @@ def another_coach_token(another_coach_user) -> str:
     token_data = {
         "user_id": str(another_coach_user.id),
         "email": another_coach_user.email,
-        "is_admin": False
+        "full_name": another_coach_user.full_name,
+        "role": another_coach_user.role.value,
+        "is_activated": another_coach_user.is_activated
     }
     return create_access_token(data=token_data)
 
