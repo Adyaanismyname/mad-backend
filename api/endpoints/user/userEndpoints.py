@@ -64,7 +64,15 @@ async def login_user(
         }
         access_token = create_access_token(data=token_data)
 
-        return StandardResponse(data={"access_token": access_token}, message="Login successful")
+        # Return user data along with token
+        user_data = UserResponse.model_validate(user).model_dump()
+        return StandardResponse(
+            data={
+                "access_token": access_token,
+                "user": user_data
+            }, 
+            message="Login successful"
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -153,7 +161,15 @@ async def verify_otp(payload: VerifyOTP, db: AsyncSession = Depends(get_db)):
         }
         access_token = create_access_token(data=token_data)
 
-        return StandardResponse(data={"access_token": access_token}, message="Account activated successfully")
+        # Return user data along with token
+        user_data = UserResponse.model_validate(user).model_dump()
+        return StandardResponse(
+            data={
+                "access_token": access_token,
+                "user": user_data
+            }, 
+            message="Account activated successfully"
+        )
     except HTTPException:
         raise
     except Exception as e:

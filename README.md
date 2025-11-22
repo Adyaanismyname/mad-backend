@@ -89,14 +89,18 @@ python -m alembic upgrade head
 ### 5. Start the Backend Server
 
 ```bash
-# Development mode with auto-reload
-uvicorn main:app --reload
+# Development mode with auto-reload (recommended with uv)
+uv run uvicorn main:app --reload
 
 # Production mode
-uvicorn main:app --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --host 0.0.0.0 --port 8000
 
 # Custom host and port
-uvicorn main:app --host 127.0.0.1 --port 8080 --reload
+uv run uvicorn main:app --host 127.0.0.1 --port 8080 --reload
+
+# Alternative: Activate virtual environment first, then run uvicorn directly
+# .venv\Scripts\activate  # Windows
+# uvicorn main:app --reload
 ```
 
 The API will be available at:

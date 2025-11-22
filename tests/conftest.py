@@ -437,12 +437,32 @@ def create_assignment_data(workout_id: str, client_id: str) -> dict:
 
 
 def create_media_data(exercise_id: str, assigned_workout_id: str | None = None) -> dict:
-    """Helper function to create media upload request data."""
+    """Helper function to create media upload request data (legacy/direct upload)."""
     return {
         "assigned_workout_id": assigned_workout_id,
         "exercise_id": exercise_id,
         "media_url": "https://storage.example.com/test-video.mp4",
         "media_type": "video"
+    }
+
+
+def create_media_initiate_data(exercise_id: str, assigned_workout_id: str | None = None) -> dict:
+    """Helper function to create media upload initiate request data (S3 presigned URL)."""
+    return {
+        "assigned_workout_id": assigned_workout_id,
+        "exercise_id": exercise_id,
+        "filename": "test-workout-video.mp4",
+        "media_type": "video",
+        "file_size_mb": 25.5
+    }
+
+
+def create_media_confirm_data(upload_id: str, exercise_id: str, assigned_workout_id: str | None = None) -> dict:
+    """Helper function to create media upload confirm request data."""
+    return {
+        "upload_id": upload_id,
+        "exercise_id": exercise_id,
+        "assigned_workout_id": assigned_workout_id
     }
 
 
