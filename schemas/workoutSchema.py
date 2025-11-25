@@ -27,6 +27,23 @@ class ExerciseResponse(ExerciseBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ExerciseCreate(ExerciseBase):
+    """Schema for creating a new exercise."""
+    pass
+
+
+class ExerciseUpdate(BaseModel):
+    """Schema for updating an existing exercise."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    muscle_group: Optional[List[str]] = None
+    instructions: Optional[str] = None
+    demo_video_url: Optional[str] = None
+    difficulty: Optional[str] = None
+    equipment_needed: Optional[List[str]] = None
+
+
 # ============= Workout Exercise Schemas =============
 
 class WorkoutExerciseCreate(BaseModel):

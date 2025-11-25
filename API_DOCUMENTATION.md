@@ -17,12 +17,13 @@ http://localhost:8000
 5. [Admin User Endpoints](#admin-user-endpoints)
 6. [Coach-Client Relationship Endpoints](#coach-client-relationship-endpoints)
 7. [Workout Endpoints](#workout-endpoints)
-8. [Workout Assignment Endpoints](#workout-assignment-endpoints)
-9. [Workout Exercise Management](#workout-exercise-management)
-10. [Media Upload Endpoints](#media-upload-endpoints)
-11. [Media Query Endpoints](#media-query-endpoints)
-12. [Media Management Endpoints](#media-management-endpoints)
-13. [Feedback Endpoints](#feedback-endpoints)
+8. [Exercise Library Endpoints](#exercise-library-endpoints)
+9. [Workout Assignment Endpoints](#workout-assignment-endpoints)
+10. [Workout Exercise Management](#workout-exercise-management)
+11. [Media Upload Endpoints](#media-upload-endpoints)
+12. [Media Query Endpoints](#media-query-endpoints)
+13. [Media Management Endpoints](#media-management-endpoints)
+14. [Feedback Endpoints](#feedback-endpoints)
 
 ---
 
@@ -1121,6 +1122,140 @@ Delete a workout routine (Coach only).
 
 - Only the coach who created the workout can delete it
 - Cascades to delete associated exercises and assignments
+
+---
+
+## Exercise Library Endpoints
+
+### 1. Create Exercise
+
+**POST** `/workouts/exercises`
+
+Create a new exercise in the library (Coach only).
+
+**Authentication:** Required (Coach)
+
+**Request Body:**
+
+```json
+{
+  "name": "Bulgarian Split Squat",
+  "description": "A unilateral leg exercise.",
+  "category": "strength",
+  "muscle_group": ["quadriceps", "glutes"],
+  "instructions": "Stand with back to bench...",
+  "demo_video_url": "https://example.com/video.mp4",
+  "difficulty": "intermediate",
+  "equipment_needed": ["dumbbell", "bench"]
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "name": "Bulgarian Split Squat",
+    "description": "A unilateral leg exercise.",
+    "category": "strength",
+    "muscle_group": ["quadriceps", "glutes"],
+    "instructions": "Stand with back to bench...",
+    "demo_video_url": "https://example.com/video.mp4",
+    "difficulty": "intermediate",
+    "equipment_needed": ["dumbbell", "bench"],
+    "created_at": "2025-11-12T10:00:00",
+    "updated_at": "2025-11-12T10:00:00"
+  },
+  "message": "Exercise created successfully"
+}
+```
+
+**Status Codes:**
+
+- `201 Created`: Exercise created successfully
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: Not a coach
+- `500 Internal Server Error`: Server error
+
+---
+
+### 2. List Exercises
+
+**GET** `/workouts/exercises`
+
+List all exercises in the library.
+
+**Authentication:** Required
+
+**Query Parameters:**
+
+- `category` (string, optional): Filter by category
+- `difficulty` (string, optional): Filter by difficulty
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "name": "Bulgarian Split Squat",
+      "category": "strength",
+      "difficulty": "intermediate"
+    }
+  ],
+  "message": "Exercises retrieved successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Exercises retrieved successfully
+- `401 Unauthorized`: Not authenticated
+- `500 Internal Server Error`: Server error
+
+---
+
+### 3. Get Exercise Details
+
+**GET** `/workouts/exercises/{exercise_id}`
+
+Get details of a specific exercise.
+
+**Authentication:** Required
+
+**Path Parameters:**
+
+- `exercise_id` (UUID): The ID of the exercise
+
+**Response:**
+
+```json
+{
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "name": "Bulgarian Split Squat",
+    "description": "A unilateral leg exercise.",
+    "category": "strength",
+    "muscle_group": ["quadriceps", "glutes"],
+    "instructions": "Stand with back to bench...",
+    "demo_video_url": "https://example.com/video.mp4",
+    "difficulty": "intermediate",
+    "equipment_needed": ["dumbbell", "bench"],
+    "created_at": "2025-11-12T10:00:00",
+    "updated_at": "2025-11-12T10:00:00"
+  },
+  "message": "Exercise retrieved successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Exercise retrieved successfully
+- `401 Unauthorized`: Not authenticated
+- `404 Not Found`: Exercise not found
+- `500 Internal Server Error`: Server error
 
 ---
 

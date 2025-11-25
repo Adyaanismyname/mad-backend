@@ -5,10 +5,14 @@ from .query import router as query_router
 from .excercise_management import router as exercise_management_router
 from .delete import router as delete_router
 from .update import router as update_router
+from .exercise_library import router as exercise_library_router
+
 # Create main feedback router
 router = APIRouter()
 
 # Include all sub-routers
+# Static routes first to avoid conflict with dynamic routes
+router.include_router(exercise_library_router, tags=["Exercise Library"])
 router.include_router(assignment_router, tags=["Assignment"])
 router.include_router(create_router, tags=["Create"])
 router.include_router(query_router, tags=["Query"])
