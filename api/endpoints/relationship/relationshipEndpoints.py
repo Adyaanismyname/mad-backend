@@ -573,3 +573,65 @@ async def get_available_clients(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"
         )
+
+
+@router.get("/clients/assigned", response_model=StandardResponse)
+async def get_assigned_clients(
+    current_user: dict = Depends(verify_user_token),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get list of clients currently assigned to the coach (Active relationships).
+    
+    Returns: {"data": [client_list], "message": "Assigned clients retrieved successfully"}
+    Errors: 401 (unauthorized), 403 (not a coach), 500 (server error)
+    """
+    try:
+        current_user_id = UUID(str(current_user.get("user_id")))
+        
+        # Verify user is a coach
+        result = await db.execute(select(User).filter(User.id == current_user_id))
+        user = result.scalar_one_or_none()
+        if not user or user.role not in [UserRole.COACH, UserRole.BOTH]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only coaches can access this endpoint"
+            )
+        
+        # Get active relationships
+        query = (
+            select(CoachClientRelationship)
+            .options(joinedload(CoachClientRelationship.client))
+            .filter(
+                CoachClientRelationship.coach_user_id == current_user_id,
+                CoachClientRelationship.status == RelationshipStatus.ACTIVE
+            )
+        )
+        
+        result = await db.execute(query)
+        relationships = result.scalars().all()
+        
+        client_list = [
+            {
+                "id": rel.client.id,
+                "email": rel.client.email,
+                "full_name": rel.client.full_name,
+                "role": rel.client.role.value,
+                "relationship_id": rel.id,
+                "relationship_status": rel.status.value
+            }
+            for rel in relationships
+        ]
+        
+        return StandardResponse(
+            data=client_list,
+            message="Assigned clients retrieved successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )
