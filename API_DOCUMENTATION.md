@@ -1709,38 +1709,322 @@ Remove an exercise from a workout (Coach only).
 
 ## Media Upload Endpoints
 
-### 1. Upload Media
+> **🎯 RECOMMENDED APPROACH:** Use the **Two-Step Presigned URL Workflow** (Steps 1-3 below) for production. This provides secure, efficient uploads directly to S3 without proxying large files through your backend.
 
-**POST** `/feedback/media`
+### Overview: How Media Upload Works
 
-Upload media (video/image) for an exercise (Client only).
+The backend implements a **two-step presigned URL workflow** for uploading workout videos and images to AWS S3:
 
-**Authentication:** Required (Client)
+1. **Initiate Upload** - Request a temporary presigned URL from backend
+2. **Upload to S3** - Upload file directly to S3 using presigned URL (bypasses backend)
+3. **Confirm Upload** - Notify backend that upload completed successfully
+
+**Why this approach?**
+
+- ✅ **Better Performance** - Files upload directly to S3, not through your server
+- ✅ **Reduced Server Load** - Backend doesn't handle large file transfers
+- ✅ **Scalability** - Can handle many concurrent uploads
+- ✅ **Security** - Presigned URLs expire after 1 hour
+- ✅ **Industry Standard** - Used by Dropbox, Instagram, YouTube, etc.
+
+**File Constraints:**
+
+- **Images**: `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp` - Max 10 MB
+- **Videos**: `.mp4`, `.mov`, `.avi`, `.webm`, `.mkv` - Max 100 MB
+
+---
+
+### 1. Initiate Upload (Get Presigned URL)
+
+**POST** `/feedback/media/initiate-upload`
+
+Request a presigned S3 URL for uploading a media file. This validates your file and provides a temporary secure URL for direct S3 upload.
+
+**Authentication:** Required (Client role)
 
 **Request Body:**
 
 ```json
 {
-  "assigned_workout_id": "123e4567-e89b-12d3-a456-426614174020",
   "exercise_id": "123e4567-e89b-12d3-a456-426614174000",
-  "media_url": "https://s3.amazonaws.com/bucket/video.mp4",
-  "media_type": "video"
+  "assigned_workout_id": "123e4567-e89b-12d3-a456-426614174020",
+  "filename": "workout_video.mp4",
+  "media_type": "video",
+  "file_size_mb": 25.5
 }
 ```
 
-**Response:**
+**Field Descriptions:**
+
+| Field                 | Type   | Required    | Description                              |
+| --------------------- | ------ | ----------- | ---------------------------------------- |
+| `exercise_id`         | UUID   | ✅ Yes      | ID of the exercise this media belongs to |
+| `assigned_workout_id` | UUID   | ❌ Optional | ID of assigned workout (if applicable)   |
+| `filename`            | string | ✅ Yes      | Original filename (e.g., "my_squat.mp4") |
+| `media_type`          | string | ✅ Yes      | Either `"video"` or `"image"`            |
+| `file_size_mb`        | number | ✅ Yes      | File size in megabytes (e.g., 25.5)      |
+
+**Response (200 OK):**
 
 ```json
 {
   "data": {
-    "id": "123e4567-e89b-12d3-a456-426614174040",
-    "client_user_id": "123e4567-e89b-12d3-a456-426614174010",
+    "upload_url": "https://bucket.s3.amazonaws.com/videos/user-id/exercise-id/20251203_143022_workout_video.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+    "media_url": "https://bucket.s3.us-east-1.amazonaws.com/videos/user-id/exercise-id/20251203_143022_workout_video.mp4",
+    "s3_key": "videos/550e8400-e29b-41d4-a716-446655440000/123e4567-e89b-12d3-a456-426614174000/20251203_143022_workout_video.mp4",
+    "content_type": "video/mp4",
+    "expires_at": "2025-12-03T15:30:22Z",
+    "upload_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+  },
+  "message": "Presigned upload URL generated successfully. Use the upload_url to PUT your file."
+}
+```
+
+**Response Field Descriptions:**
+
+| Field          | Description                                                   |
+| -------------- | ------------------------------------------------------------- |
+| `upload_url`   | **USE THIS** to upload your file via PUT request (see Step 2) |
+| `media_url`    | Final URL where file will be accessible (save for later)      |
+| `s3_key`       | S3 object key (internal identifier)                           |
+| `content_type` | MIME type to use in upload headers                            |
+| `expires_at`   | ISO timestamp when upload_url expires (1 hour from now)       |
+| `upload_id`    | **SAVE THIS** - needed for confirmation in Step 3             |
+
+**Status Codes:**
+
+- `200 OK` - Presigned URL generated successfully
+- `400 Bad Request` - Invalid file type, size, or missing fields
+- `401 Unauthorized` - Not authenticated or invalid token
+- `403 Forbidden` - `assigned_workout_id` doesn't belong to you
+- `500 Internal Server Error` - Server or AWS S3 error
+
+**Important Notes:**
+
+- ⚠️ **URL expires in 1 hour** - If it expires, request a new one
+- ⚠️ **Don't modify the upload_url** - Any changes will invalidate the signature
+- ✅ **Save the `upload_id`** - You need it for Step 3 (confirm)
+- ✅ **File validation happens here** - Invalid files rejected before upload
+
+---
+
+### 2. Upload File to S3
+
+**PUT** `{upload_url}` (from Step 1)
+
+Upload the actual file binary directly to AWS S3 using the presigned URL. **This request goes to S3, not to your backend.**
+
+**Authentication:** None (presigned URL is self-authenticating)
+
+**Request Headers:**
+
+```
+Content-Type: {content_type from Step 1}
+```
+
+**Request Body:** Raw file binary (no JSON, no form data)
+
+**Frontend Implementation Examples:**
+
+<details>
+<summary><b>JavaScript / React / React Native</b></summary>
+
+```javascript
+// After Step 1, you have presignedData with upload_url and content_type
+const uploadToS3 = async (file, presignedData) => {
+  try {
+    const response = await fetch(presignedData.upload_url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": presignedData.content_type,
+      },
+      body: file, // Raw File object
+    });
+
+    if (!response.ok) {
+      throw new Error(`S3 upload failed: ${response.status}`);
+    }
+
+    console.log("Upload successful!");
+    return true;
+  } catch (error) {
+    console.error("Upload error:", error);
+    throw error;
+  }
+};
+
+// Usage
+const file = document.querySelector('input[type="file"]').files[0];
+await uploadToS3(file, presignedData);
+```
+
+</details>
+
+<details>
+<summary><b>React Native with Expo</b></summary>
+
+```javascript
+import * as FileSystem from "expo-file-system";
+
+const uploadToS3 = async (fileUri, presignedData) => {
+  try {
+    const response = await FileSystem.uploadAsync(
+      presignedData.upload_url,
+      fileUri,
+      {
+        httpMethod: "PUT",
+        headers: {
+          "Content-Type": presignedData.content_type,
+        },
+      }
+    );
+
+    if (response.status !== 200) {
+      throw new Error(`S3 upload failed: ${response.status}`);
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Upload error:", error);
+    throw error;
+  }
+};
+```
+
+</details>
+
+<details>
+<summary><b>Axios</b></summary>
+
+```javascript
+import axios from "axios";
+
+const uploadToS3 = async (file, presignedData) => {
+  await axios.put(presignedData.upload_url, file, {
+    headers: {
+      "Content-Type": presignedData.content_type,
+    },
+  });
+};
+```
+
+</details>
+
+**Response:** S3 returns `200 OK` on success (no JSON body)
+
+**Status Codes:**
+
+- `200 OK` - Upload successful
+- `403 Forbidden` - Invalid signature or expired URL
+- `400 Bad Request` - Invalid request
+
+**Important Notes:**
+
+- ⚠️ **Use PUT, not POST** - S3 requires PUT method
+- ⚠️ **Content-Type must match** - Use exact value from Step 1
+- ⚠️ **Send raw file, not form data** - Direct binary upload
+- ⚠️ **No Authorization header** - Presigned URL handles auth
+- ✅ **Monitor upload progress** - Implement progress indicators for UX
+
+---
+
+### 3. Confirm Upload
+
+**POST** `/feedback/media/confirm-upload`
+
+After successfully uploading to S3 (Step 2), confirm the upload to create the database record. This verifies the file exists in S3 and makes it available in your app.
+
+**Authentication:** Required (Client role)
+
+**Request Body:**
+
+```json
+{
+  "upload_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "exercise_id": "123e4567-e89b-12d3-a456-426614174000",
+  "assigned_workout_id": "123e4567-e89b-12d3-a456-426614174020"
+}
+```
+
+**Field Descriptions:**
+
+| Field                 | Type | Required    | Description              |
+| --------------------- | ---- | ----------- | ------------------------ |
+| `upload_id`           | UUID | ✅ Yes      | ID from Step 1 response  |
+| `exercise_id`         | UUID | ✅ Yes      | Same as Step 1           |
+| `assigned_workout_id` | UUID | ❌ Optional | Same as Step 1 (if used) |
+
+**Response (201 Created):**
+
+```json
+{
+  "data": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "client_user_id": "550e8400-e29b-41d4-a716-446655440000",
     "assigned_workout_id": "123e4567-e89b-12d3-a456-426614174020",
     "exercise_id": "123e4567-e89b-12d3-a456-426614174000",
-    "media_url": "https://s3.amazonaws.com/bucket/video.mp4",
+    "media_url": "https://bucket.s3.us-east-1.amazonaws.com/videos/...",
     "media_type": "video",
     "status": "ready",
-    "created_at": "2025-11-12T10:00:00"
+    "created_at": "2025-12-03T14:31:00Z"
+  },
+  "message": "Media upload confirmed successfully"
+}
+```
+
+**Status Codes:**
+
+- `201 Created` - Upload confirmed, media record created
+- `400 Bad Request` - Invalid/expired upload_id or upload already confirmed
+- `401 Unauthorized` - Not authenticated
+- `403 Forbidden` - Upload_id belongs to different user or invalid workout
+- `404 Not Found` - File not found in S3 (Step 2 didn't complete)
+- `422 Unprocessable Entity` - Invalid exercise_id or assigned_workout_id
+- `500 Internal Server Error` - Server error
+
+**What Happens Internally:**
+
+1. ✅ Validates `upload_id` exists and hasn't expired
+2. ✅ Verifies you're the user who initiated the upload
+3. ✅ Checks file actually exists in S3
+4. ✅ Creates permanent `MediaUpload` database record
+5. ✅ Marks pending upload as confirmed (audit trail)
+
+---
+
+### 4. Direct Upload (Legacy/Testing Only)
+
+**POST** `/feedback/media`
+
+⚠️ **NOT RECOMMENDED FOR PRODUCTION** - Direct media upload bypassing the presigned URL workflow. Only use for testing or if you're managing S3 uploads externally.
+
+**Authentication:** Required (Client role)
+
+**Request Body:**
+
+```json
+{
+  "exercise_id": "123e4567-e89b-12d3-a456-426614174000",
+  "assigned_workout_id": "123e4567-e89b-12d3-a456-426614174020",
+  "media_url": "https://bucket.s3.amazonaws.com/videos/my-file.mp4",
+  "media_type": "video",
+  "s3_key": "videos/user-id/exercise-id/my-file.mp4"
+}
+```
+
+**Response (201 Created):**
+
+```json
+{
+  "data": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "client_user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "assigned_workout_id": "123e4567-e89b-12d3-a456-426614174020",
+    "exercise_id": "123e4567-e89b-12d3-a456-426614174000",
+    "media_url": "https://bucket.s3.amazonaws.com/videos/my-file.mp4",
+    "media_type": "video",
+    "status": "ready",
+    "created_at": "2025-12-03T14:00:00Z"
   },
   "message": "Media uploaded successfully"
 }
@@ -1748,184 +2032,382 @@ Upload media (video/image) for an exercise (Client only).
 
 **Status Codes:**
 
-- `201 Created`: Media uploaded successfully
-- `401 Unauthorized`: Not authenticated
-- `403 Forbidden`: Assigned workout not found or not authorized
-- `422 Unprocessable Entity`: Invalid exercise or workout ID
-- `500 Internal Server Error`: Server error
-
-**Notes:**
-
-- `media_type` must be "video" or "image"
-- `assigned_workout_id` is optional
-- Status is automatically set to "ready"
+- `201 Created` - Media record created
+- `401 Unauthorized` - Not authenticated
+- `403 Forbidden` - Unauthorized access to workout
+- `422 Unprocessable Entity` - Invalid exercise or workout ID
+- `500 Internal Server Error` - Server error
 
 ---
 
-## S3 Storage: Uploading & Downloading Media (Recommended)
+## Complete Upload Workflow - Frontend Integration Guide
 
-This section documents how the frontend should upload and download large media files (videos/images) using AWS S3. The recommended approach is direct-to-S3 uploads using presigned URLs (the backend returns a temporary URL the client can PUT to). This avoids proxying large files through your backend.
+### Full Example Implementation (JavaScript/TypeScript)
 
-Important: The backend must still be notified of the uploaded file so it can create a `MediaUpload` record referencing the S3 object (key/URL) and link it to the relevant `assigned_workout_id` / `exercise_id`.
+```javascript
+/**
+ * Complete media upload workflow with error handling and progress tracking
+ */
+class MediaUploader {
+  constructor(apiBaseUrl, authToken) {
+    this.apiBaseUrl = apiBaseUrl;
+    this.authToken = authToken;
+  }
 
-Environment variables (backend):
+  /**
+   * Upload a file using the two-step presigned URL workflow
+   */
+  async uploadMedia(file, exerciseId, assignedWorkoutId = null) {
+    try {
+      // Validate file before starting
+      this.validateFile(file);
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `AWS_S3_BUCKET`
-- `S3_PRESIGN_EXPIRES` (seconds, optional, default e.g. 900)
+      // Step 1: Initiate upload - get presigned URL
+      console.log("Step 1: Requesting presigned URL...");
+      const presignedData = await this.initiateUpload(
+        file,
+        exerciseId,
+        assignedWorkoutId
+      );
 
-IAM permissions required for the backend credentials that generate presigned URLs:
+      // Step 2: Upload to S3
+      console.log("Step 2: Uploading to S3...");
+      await this.uploadToS3(file, presignedData);
 
-- `s3:PutObject` for uploads
-- `s3:GetObject` for downloads (if generating presigned GET URLs)
-- Optionally `s3:ListBucket` / `s3:DeleteObject` depending on features
+      // Step 3: Confirm upload
+      console.log("Step 3: Confirming upload...");
+      const mediaRecord = await this.confirmUpload(
+        presignedData.upload_id,
+        exerciseId,
+        assignedWorkoutId
+      );
 
-Bucket CORS (example) — required to allow browser PUT/POST directly to S3:
+      console.log("Upload complete!", mediaRecord);
+      return mediaRecord;
+    } catch (error) {
+      console.error("Upload failed:", error);
+      throw error;
+    }
+  }
 
-```xml
-<CORSConfiguration>
-  <CORSRule>
-    <AllowedOrigin>https://your-frontend.example.com</AllowedOrigin>
-    <AllowedMethod>PUT</AllowedMethod>
-    <AllowedMethod>POST</AllowedMethod>
-    <AllowedMethod>GET</AllowedMethod>
-    <AllowedHeader>*</AllowedHeader>
-    <ExposeHeader>ETag</ExposeHeader>
-    <MaxAgeSeconds>3000</MaxAgeSeconds>
-  </CORSRule>
-</CORSConfiguration>
-```
+  /**
+   * Step 1: Request presigned URL from backend
+   */
+  async initiateUpload(file, exerciseId, assignedWorkoutId) {
+    const mediaType = file.type.startsWith("video/") ? "video" : "image";
+    const fileSizeMB = file.size / (1024 * 1024);
 
-Flow A — Direct-to-S3 (Recommended)
+    const response = await fetch(
+      `${this.apiBaseUrl}/feedback/media/initiate-upload`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.authToken}`,
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          media_type: mediaType,
+          file_size_mb: fileSizeMB,
+          exercise_id: exerciseId,
+          assigned_workout_id: assignedWorkoutId,
+        }),
+      }
+    );
 
-1. Frontend requests a presigned upload URL from the backend. Example endpoint you should call in the backend:
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || "Failed to initiate upload");
+    }
 
-- `POST /feedback/media/presign` (body includes `filename`, `content_type`, `media_type`, optional `assigned_workout_id`, `exercise_id`)
+    const result = await response.json();
+    return result.data;
+  }
 
-Example request (get presigned URL):
+  /**
+   * Step 2: Upload file directly to S3
+   */
+  async uploadToS3(file, presignedData, onProgress = null) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
 
-```bash
-curl -X POST "https://api.example.com/feedback/media/presign" \
-  -H "Authorization: Bearer <JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{"filename":"video.mp4","content_type":"video/mp4","media_type":"video","assigned_workout_id":"<uuid>","exercise_id":"<uuid>"}'
-```
+      // Track upload progress
+      if (onProgress) {
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) {
+            const percentComplete = (e.loaded / e.total) * 100;
+            onProgress(percentComplete);
+          }
+        });
+      }
 
-Example response (from backend):
+      xhr.addEventListener("load", () => {
+        if (xhr.status === 200) {
+          resolve();
+        } else {
+          reject(new Error(`S3 upload failed: ${xhr.status}`));
+        }
+      });
 
-```json
-{
-  "data": {
-    "upload_url": "https://your-bucket.s3.amazonaws.com/object-key?X-Amz-Signature=...",
-    "object_key": "uploads/2025/11/15/<generated-key>.mp4",
-    "expires_in": 900
-  },
-  "message": "Presigned URL generated"
+      xhr.addEventListener("error", () => {
+        reject(new Error("Network error during S3 upload"));
+      });
+
+      xhr.addEventListener("abort", () => {
+        reject(new Error("Upload aborted"));
+      });
+
+      xhr.open("PUT", presignedData.upload_url);
+      xhr.setRequestHeader("Content-Type", presignedData.content_type);
+      xhr.send(file);
+    });
+  }
+
+  /**
+   * Step 3: Confirm upload with backend
+   */
+  async confirmUpload(uploadId, exerciseId, assignedWorkoutId) {
+    const response = await fetch(
+      `${this.apiBaseUrl}/feedback/media/confirm-upload`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.authToken}`,
+        },
+        body: JSON.stringify({
+          upload_id: uploadId,
+          exercise_id: exerciseId,
+          assigned_workout_id: assignedWorkoutId,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || "Failed to confirm upload");
+    }
+
+    const result = await response.json();
+    return result.data;
+  }
+
+  /**
+   * Validate file before upload
+   */
+  validateFile(file) {
+    const validImageTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+    ];
+    const validVideoTypes = [
+      "video/mp4",
+      "video/quicktime",
+      "video/x-msvideo",
+      "video/webm",
+      "video/x-matroska",
+    ];
+    const maxImageSize = 10 * 1024 * 1024; // 10 MB
+    const maxVideoSize = 100 * 1024 * 1024; // 100 MB
+
+    const isImage = validImageTypes.includes(file.type);
+    const isVideo = validVideoTypes.includes(file.type);
+
+    if (!isImage && !isVideo) {
+      throw new Error(`Invalid file type: ${file.type}`);
+    }
+
+    if (isImage && file.size > maxImageSize) {
+      throw new Error("Image size exceeds 10 MB limit");
+    }
+
+    if (isVideo && file.size > maxVideoSize) {
+      throw new Error("Video size exceeds 100 MB limit");
+    }
+  }
 }
-```
 
-2. Frontend uploads the file directly to S3 using the `upload_url` (PUT request). Preserve `Content-Type` header.
+// Usage Example
+const uploader = new MediaUploader("https://api.example.com", userToken);
 
-Example upload (browser/fetch):
+// With progress tracking
+const fileInput = document.getElementById("file-input");
+fileInput.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-```js
-await fetch(upload_url, {
-  method: "PUT",
-  headers: { "Content-Type": "video/mp4" },
-  body: file, // File object from input
+  try {
+    const media = await uploader.uploadMedia(
+      file,
+      exerciseId,
+      assignedWorkoutId
+    );
+    console.log("Media uploaded:", media);
+  } catch (error) {
+    alert(`Upload failed: ${error.message}`);
+  }
 });
 ```
 
-or curl:
+---
 
-```bash
-curl -X PUT "<upload_url>" -H "Content-Type: video/mp4" --upload-file ./video.mp4
-```
+### React Component Example
 
-3. After successful upload (HTTP 200 or 201 from S3), notify your backend to create the media record (unless backend already created a pending record when returning the presign). This endpoint stores metadata and the S3 `object_key`/`url`.
+```jsx
+import React, { useState } from "react";
 
-- `POST /feedback/media` (body: `object_key` or `media_url`, `assigned_workout_id`, `exercise_id`, `media_type`)
+function MediaUploadComponent({ exerciseId, assignedWorkoutId, authToken }) {
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState(null);
+  const [uploadedMedia, setUploadedMedia] = useState(null);
 
-Example register request:
+  const handleFileSelect = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
 
-```bash
-curl -X POST "https://api.example.com/feedback/media" \
-  -H "Authorization: Bearer <JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{"object_key":"uploads/.../video.mp4","media_type":"video","assigned_workout_id":"<uuid>","exercise_id":"<uuid>"}'
-```
+    setUploading(true);
+    setProgress(0);
+    setError(null);
 
-The backend should respond with the `MediaUpload` resource (id, media_url, status)
+    try {
+      const uploader = new MediaUploader("https://api.example.com", authToken);
 
-Flow B — Backend-proxied Upload (Not recommended for large files)
+      // Override uploadToS3 to track progress
+      const originalUploadToS3 = uploader.uploadToS3.bind(uploader);
+      uploader.uploadToS3 = (file, presignedData) => {
+        return originalUploadToS3(file, presignedData, setProgress);
+      };
 
-1. Frontend sends a multipart/form-data POST to the backend: `POST /feedback/media/upload` with fields `file` (binary), `assigned_workout_id`, `exercise_id`, `media_type`.
-2. Backend receives file, uploads server-side to S3 (using the SDK), stores the `object_key` and returns the `MediaUpload` resource.
+      const media = await uploader.uploadMedia(
+        file,
+        exerciseId,
+        assignedWorkoutId
+      );
 
-Example proxy upload (curl):
+      setUploadedMedia(media);
+      setProgress(100);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
 
-```bash
-curl -X POST "https://api.example.com/feedback/media/upload" \
-  -H "Authorization: Bearer <JWT>" \
-  -F "file=@./video.mp4;type=video/mp4" \
-  -F "media_type=video" \
-  -F "assigned_workout_id=<uuid>"
-```
+  return (
+    <div>
+      <input
+        type="file"
+        accept="video/*,image/*"
+        onChange={handleFileSelect}
+        disabled={uploading}
+      />
 
-Notes about proxy uploads:
+      {uploading && (
+        <div>
+          <p>Uploading... {Math.round(progress)}%</p>
+          <progress value={progress} max="100" />
+        </div>
+      )}
 
-- Easier to implement but causes heavy bandwidth and memory usage on your backend
-- Use only for small files or when direct-to-S3 is not possible
+      {error && <p style={{ color: "red" }}>Error: {error}</p>}
 
-Downloading / Streaming
-
-- The backend should _not_ expose raw S3 credentials. Use presigned GET URLs for temporary access to objects.
-- Example endpoint: `GET /feedback/media/{media_id}/download` returns a presigned GET URL or redirects to it.
-
-Example flow to download:
-
-1. Frontend GETs `https://api.example.com/feedback/media/{media_id}/download` with Authorization header.
-2. Backend generates a presigned GET URL (short expiration) and returns it in the response.
-3. Frontend uses that URL to download or stream the file directly from S3.
-
-Example response for presigned GET:
-
-```json
-{
-  "data": {
-    "download_url": "https://your-bucket.s3.amazonaws.com/object-key?X-Amz-Signature=...",
-    "expires_in": 300
-  },
-  "message": "Presigned download URL generated"
+      {uploadedMedia && (
+        <div>
+          <p>Upload successful!</p>
+          <video src={uploadedMedia.media_url} controls />
+        </div>
+      )}
+    </div>
+  );
 }
 ```
 
-Security considerations
+---
 
-- Limit presigned URL expiration to a short duration (e.g., 5–15 minutes)
-- Ensure presigned upload keys are unpredictable (include user id / timestamp / random UUID)
-- Validate file type and size on backend when the upload is registered (don't rely solely on client or S3 headers)
-- Enforce S3 bucket policies to prevent public object ACLs unless intentional
+### Error Handling Best Practices
 
-Frontend checklist
+```javascript
+async function uploadWithRetry(
+  file,
+  exerciseId,
+  assignedWorkoutId,
+  maxRetries = 3
+) {
+  const uploader = new MediaUploader(API_BASE_URL, authToken);
 
-- Request presigned upload URL from backend before uploading
-- Use the exact `Content-Type` when uploading to S3
-- After upload, call backend to register the `object_key` (unless backend already did it when issuing presign)
-- To download, ask backend for a presigned GET URL and use that URL to fetch the file
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await uploader.uploadMedia(file, exerciseId, assignedWorkoutId);
+    } catch (error) {
+      console.error(`Upload attempt ${attempt} failed:`, error);
+
+      // Don't retry on validation errors (4xx)
+      if (
+        error.message.includes("Invalid file") ||
+        error.message.includes("400") ||
+        error.message.includes("403")
+      ) {
+        throw error;
+      }
+
+      // Retry on network/server errors (5xx)
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        throw new Error(`Upload failed after ${maxRetries} attempts`);
+      }
+    }
+  }
+}
+```
 
 ---
 
-Additions to existing media endpoints in this doc:
+### Common Frontend Issues & Solutions
 
-- `POST /feedback/media/presign` — Generate presigned upload URL (recommended)
-- `POST /feedback/media` — Create/register media record (object_key or media_url)
-- `POST /feedback/media/upload` — (optional) Proxy upload endpoint for multipart/form-data
-- `GET /feedback/media/{media_id}/download` — Return presigned GET URL for download
+| Issue                          | Cause                                   | Solution                                                         |
+| ------------------------------ | --------------------------------------- | ---------------------------------------------------------------- |
+| **403 Forbidden on S3 upload** | Wrong Content-Type or expired URL       | Use exact `content_type` from Step 1, request new URL if expired |
+| **404 on confirm**             | File didn't upload to S3                | Check Step 2 response was 200, verify network connection         |
+| **400 Invalid file type**      | Wrong file extension or too large       | Validate client-side before Step 1                               |
+| **Upload hangs**               | Network issue or CORS problem           | Implement timeout, check S3 bucket CORS config                   |
+| **Progress stuck at 0%**       | Using fetch() instead of XMLHttpRequest | Use XMLHttpRequest or libraries with progress support            |
 
-Implementors can adapt names/paths to match the actual backend routes; the above are recommended conventions that map directly to the existing `feedback/media` namespace described earlier.
+---
+
+## S3 File Organization
+
+Files are automatically organized in S3 with this structure:
+
+```
+your-bucket/
+├── videos/
+│   └── {user_id}/
+│       └── {exercise_id}/
+│           ├── 20251203_143022_squat_form.mp4
+│           ├── 20251203_150130_deadlift.mp4
+│           └── ...
+└── images/
+    └── {user_id}/
+        └── {exercise_id}/
+            ├── 20251203_143022_progress_photo.jpg
+            ├── 20251203_151245_form_check.png
+            └── ...
+```
+
+**Benefits:**
+
+- User isolation (privacy)
+- Easy to find/delete user's content
+- Prevents filename collisions
+- Organized by exercise context
+
+---
 
 ## Media Query Endpoints
 

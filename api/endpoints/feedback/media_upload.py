@@ -17,7 +17,7 @@ from models.media_upload import MediaUpload
 from models.assigned_workout import AssignedWorkout
 from models.pending_upload import PendingUpload
 from uuid import UUID, uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -243,7 +243,7 @@ async def confirm_media_upload(
         
         # Mark pending upload as confirmed (soft delete for audit trail)
         pending_upload.status = 'confirmed'
-        pending_upload.deleted_at = datetime.utcnow()
+        pending_upload.deleted_at = datetime.now(timezone.utc)
         
         await db.commit()
         await db.refresh(media_upload)

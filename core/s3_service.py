@@ -201,22 +201,14 @@ class S3Service:
         s3_key = self._generate_s3_key(user_id, exercise_id, filename, media_type)
         
         try:
-            # Generate presigned URL with metadata
-            # IMPORTANT: Client MUST include these exact metadata headers when uploading
-            # or the signature will fail
-            metadata = {
-                'user-id': str(user_id),
-                'exercise-id': str(exercise_id),
-                'uploaded-at': datetime.now(timezone.utc).isoformat()
-            }
-            
+            # Generate presigned URL without metadata to avoid signature issues
+            # Metadata is stored in the database instead
             presigned_url = self.s3_client.generate_presigned_url(
                 'put_object',
                 Params={
                     'Bucket': self.bucket_name,
                     'Key': s3_key,
-                    'ContentType': mime_type,
-                    'Metadata': metadata
+                    'ContentType': mime_type
                 },
                 ExpiresIn=expires_in,
                 HttpMethod='PUT'
@@ -237,7 +229,6 @@ class S3Service:
                 's3_key': s3_key,
                 'media_url': media_url,
                 'content_type': mime_type,
-                'metadata': metadata,  # Include metadata so client knows what headers to send
                 'expires_at': expires_at.isoformat()
             }
             
