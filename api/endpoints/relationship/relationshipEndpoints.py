@@ -477,7 +477,8 @@ async def get_available_coaches(
         # Get all coaches not connected
         query = select(User).filter(
             User.role.in_([UserRole.COACH, UserRole.BOTH]),
-            User.id != current_user_id
+            User.id != current_user_id,
+            User.is_activated
         )
         
         if connected_coach_ids:
@@ -485,7 +486,6 @@ async def get_available_coaches(
         
         result = await db.execute(query)
         coaches = result.scalars().all()
-        
         coach_list = [
             {
                 "id": coach.id,
