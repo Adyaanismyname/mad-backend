@@ -128,11 +128,6 @@ class TestS3TwoStepUploadWorkflow:
             'Content-Type': presigned_data['content_type']
         }
         
-        # Add metadata headers (x-amz-meta-* format)
-        if 'metadata' in presigned_data:
-            for key, value in presigned_data['metadata'].items():
-                headers[f'x-amz-meta-{key}'] = value
-        
         response = requests.put(
             upload_url,
             data=test_image_data,
@@ -195,15 +190,10 @@ class TestS3TwoStepUploadWorkflow:
             b'\x6d\x70\x34\x31'
         ) * 100  # Repeat to make it bigger
         
-        # Step 3: Upload to S3 with metadata headers
+        # Step 3: Upload to S3
         headers = {
             'Content-Type': presigned_data['content_type']
         }
-        
-        # Add metadata headers to match signature
-        if 'metadata' in presigned_data:
-            for key, value in presigned_data['metadata'].items():
-                headers[f'x-amz-meta-{key}'] = value
         
         response = requests.put(
             upload_url,
@@ -399,13 +389,10 @@ class TestS3DownloadURLs:
             file_size_mb=0.1
         )
         
-        # Upload minimal image with metadata headers
+        # Upload minimal image
         headers = {
             'Content-Type': presigned_data['content_type']
         }
-        if 'metadata' in presigned_data:
-            for key, value in presigned_data['metadata'].items():
-                headers[f'x-amz-meta-{key}'] = value
         
         test_image = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9'
         response = requests.put(

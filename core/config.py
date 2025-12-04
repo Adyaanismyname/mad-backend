@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     AWS_REGION: str | None = None
     AWS_DEFAULT_REGION: str | None = None
     AWS_S3_BUCKET_NAME: str | None = None
+    AWS_CLOUDFRONT_DOMAIN: str | None = None  # Optional CDN domain
     BUCKET_NAME: str | None = None
     ENVIRONMENT: str | None = None
     S3_PRESIGN_EXPIRES: int = 3600  # seconds

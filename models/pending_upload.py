@@ -3,7 +3,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from db.base import Base
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -83,7 +83,7 @@ class PendingUpload(Base):
     
     def is_expired(self) -> bool:
         """Check if this pending upload has expired."""
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     def is_valid(self) -> bool:
         """Check if this pending upload is still valid for confirmation."""

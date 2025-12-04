@@ -9,7 +9,7 @@ This module provides scheduled tasks for:
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, and_
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models.pending_upload import PendingUpload
 from core.s3_service import get_s3_service
 import logging
@@ -46,7 +46,7 @@ async def cleanup_expired_pending_uploads(
     }
     
     try:
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc)
         
         # Step 1: Mark expired pending uploads
         result = await db.execute(
@@ -178,7 +178,7 @@ async def get_pending_uploads_stats(db: AsyncSession) -> dict:
             'pending_expired_but_not_marked': 0
         }
         
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc)
         
         for upload in all_uploads:
             stats[upload.status] = stats.get(upload.status, 0) + 1
