@@ -76,3 +76,18 @@ class VerifyOTP(BaseModel):
     email: EmailStr
     token: str
 
+class ForgetPassword(BaseModel):
+    """
+    Request Model for forget password request
+    """
+    email: EmailStr
+
+
+class ResetPassword(BaseModel):
+    """
+    Request model for resetting password with OTP verification.
+    Used after forget password flow.
+    """
+    email: EmailStr
+    otp: str
+    new_password: str

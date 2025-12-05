@@ -3,13 +3,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import select
 from db.session import get_db
-from schemas.userSchema import UserLogin, UserTokenData, SignupRequest, VerifyOTP, UserResponse
+from schemas.userSchema import ForgetPassword, ResetPassword, UserLogin, UserTokenData, SignupRequest, VerifyOTP, UserResponse
 from core.auth import create_access_token, verify_admin_token, verify_user_token
 from models.user import User
 from schemas.core import StandardResponse
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from api.endpoints.helper_methods import generate_and_send_otp
+import secrets
 
 router = APIRouter()
 
@@ -115,6 +116,146 @@ async def signup_user(payload: SignupRequest, background_tasks: BackgroundTasks,
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
+@router.post("/forget-password", response_model=StandardResponse, status_code=status.HTTP_200_OK)
+async def forget_password(
+    payload: ForgetPassword,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Handle forget password request by sending OTP to user's email.
+    
+    Args:
+        payload (ForgetPassword): Contains user's email address
+        background_tasks (BackgroundTasks): FastAPI background tasks for async email
+        db (AsyncSession): Database session
+    
+    Returns:
+        StandardResponse: Success message (always returns 200 to prevent enumeration (email))
+    
+    Errors:
+        400 Bad Request: If account is not activated
+        500 Internal Server Error: If an unexpected error occurs
+    """
+    try:
+        result = await db.execute(select(User).filter(User.email == payload.email))
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            print("here")
+            return StandardResponse( 
+                data={},
+                message="If an account with this email exists, a password reset code has been sent"
+            )
+        
+        # Only activated users should reset password
+        if not user.is_activated:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Account not activated. Please complete signup verification first"
+            )
+        
+        await generate_and_send_otp(user, db, background_tasks)
+        
+        return StandardResponse(
+            data={},
+            message="If an account with this email exists, a password reset code has been sent"
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )
+
+
+@router.post("/reset-password", response_model=StandardResponse, status_code=status.HTTP_200_OK)
+async def reset_password(
+    payload: ResetPassword,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reset user password using OTP verification.
+    
+    Validates OTP, checks expiration (10 minutes), and updates password.
+    OTP is cleared after successful password reset.
+    
+    Args:
+        payload (ResetPassword): Contains email, OTP code, and new password
+        db (AsyncSession): Database session
+    
+    Returns:
+        StandardResponse: Success message on password reset
+    
+    Errors:
+        400 Bad Request: If user not found, invalid OTP, or OTP expired
+        500 Internal Server Error: If an unexpected error occurs
+    """
+    try:
+        result = await db.execute(select(User).filter(User.email == payload.email))
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid email or OTP"
+            )
+        
+        if not user.is_activated:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Account not activated"
+            )
+        
+        if not user.otp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No password reset request found. Please request a new code"
+            )
+
+        if not secrets.compare_digest(user.otp, payload.otp):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OTP"
+            )
+        
+        # Check if OTP is expired (10 minutes)
+        if not user.otp_created_at:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OTP timestamp not found. Please request a new code"
+            )
+        
+        otp_age = datetime.now(timezone.utc) - user.otp_created_at
+        if otp_age > timedelta(minutes=10):
+            # Clear expired OTP
+            user.otp = None
+            user.otp_created_at = None
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OTP has expired. Please request a new code"
+            )
+        
+        # Update password and clear OTP
+        user.set_password(payload.new_password)
+        user.otp = None
+        user.otp_created_at = None
+        await db.commit()
+        
+        return StandardResponse(
+            data={},
+            message="Password reset successfully. Please login with your new password"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )
 
 @router.post("/verify-otp", response_model=StandardResponse)
 async def verify_otp(payload: VerifyOTP, db: AsyncSession = Depends(get_db)):
@@ -134,7 +275,7 @@ async def verify_otp(payload: VerifyOTP, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No OTP found for this user")
 
         # Check if OTP matches
-        if user.otp != payload.token:
+        if not secrets.compare_digest(user.otp, payload.token):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP")
 
         # Check if OTP is expired (10 minutes)
