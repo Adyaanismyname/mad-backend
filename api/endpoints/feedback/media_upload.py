@@ -47,8 +47,6 @@ async def initiate_media_upload(
     Returns: {
         "data": {
             "upload_url": "https://...",  # Use this URL for PUT request
-            "media_url": "https://...",   # Save this URL for confirm step
-            "s3_key": "...",
             "content_type": "...",
             "expires_at": "...",
             "upload_id": "..."            # Use this ID to confirm upload
@@ -124,8 +122,6 @@ async def initiate_media_upload(
         
         response_data = PresignedUploadResponse(
             upload_url=presigned_data['upload_url'],
-            media_url=presigned_data['media_url'],
-            s3_key=presigned_data['s3_key'],
             content_type=presigned_data['content_type'],
             expires_at=presigned_data['expires_at'],
             upload_id=upload_id
@@ -310,13 +306,17 @@ async def upload_media_direct(
                     detail="Assigned workout not found or not authorized"
                 )
         
+        # Extract s3_key from media_url
+        s3_service = get_s3_service()
+        s3_key = s3_service.extract_s3_key_from_url(media_data.media_url)
+        
         # Create media upload directly (bypass S3 presigned URL workflow)
         media_upload = MediaUpload(
             client_user_id=client_user_id,
             assigned_workout_id=media_data.assigned_workout_id,
             exercise_id=media_data.exercise_id,
             media_url=media_data.media_url,
-            s3_key=media_data.s3_key,
+            s3_key=s3_key,
             media_type=media_data.media_type,
             status="ready"
         )

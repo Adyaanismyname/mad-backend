@@ -166,13 +166,28 @@ async def get_media_with_feedback(
             else:
                 root_feedback.append(fb_dict)
         
+        # Generate presigned URL for secure access
+        from core.s3_service import get_s3_service
+        import logging
+        logger = logging.getLogger(__name__)
+        s3_service = get_s3_service()
+        presigned_url = None
+        if media.s3_key:
+            try:
+                presigned_url = s3_service.generate_presigned_download_url(
+                    s3_key=media.s3_key,
+                    expires_in=3600  # 1 hour
+                )
+            except Exception as e:
+                logger.warning(f"Failed to generate presigned URL for media {media.id}: {e}")
+        
         # Create media response
         media_response = MediaWithFeedbackResponse(
             id=media.id,
             client_user_id=media.client_user_id,
             assigned_workout_id=media.assigned_workout_id,
             exercise_id=media.exercise_id,
-            media_url=media.media_url,
+            presigned_url=presigned_url,
             media_type=media.media_type,
             status=media.status,
             created_at=media.created_at,

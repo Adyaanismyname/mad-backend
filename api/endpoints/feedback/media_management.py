@@ -65,7 +65,20 @@ async def get_media_details(
                 detail="Not authorized to view this media"
             )
         
+        # Generate presigned URL for secure access
+        s3_service = get_s3_service()
+        presigned_url = None
+        if media.s3_key:
+            try:
+                presigned_url = s3_service.generate_presigned_download_url(
+                    s3_key=media.s3_key,
+                    expires_in=3600  # 1 hour
+                )
+            except Exception as e:
+                logger.warning(f"Failed to generate presigned URL for media {media.id}: {e}")
+        
         response = MediaUploadResponse.model_validate(media)
+        response.presigned_url = presigned_url
         return StandardResponse(
             data=response.model_dump(),
             message="Media retrieved successfully"

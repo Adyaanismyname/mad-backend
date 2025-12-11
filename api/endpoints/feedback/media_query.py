@@ -5,6 +5,7 @@ from db.session import get_db
 from schemas.feedbackSchema import MediaUploadResponse
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
+from core.s3_service import get_s3_service
 from models.media_upload import MediaUpload
 from typing import Optional
 from uuid import UUID
@@ -42,7 +43,22 @@ async def get_my_media_uploads(
         result = await db.execute(query)
         media_uploads = result.scalars().all()
         
-        uploads = [MediaUploadResponse.model_validate(mu).model_dump() for mu in media_uploads]
+        # Generate presigned URLs for each media upload
+        s3_service = get_s3_service()
+        
+        uploads = []
+        for mu in media_uploads:
+            response = MediaUploadResponse.model_validate(mu)
+            # Generate presigned URL for secure access
+            if mu.s3_key:
+                try:
+                    response.presigned_url = s3_service.generate_presigned_download_url(
+                        s3_key=mu.s3_key,
+                        expires_in=3600  # 1 hour
+                    )
+                except Exception as e:
+                    print(f"Failed to generate presigned URL for media {mu.id}: {e}")
+            uploads.append(response.model_dump())
         
         return StandardResponse(
             data=uploads,
@@ -92,7 +108,22 @@ async def get_client_media_uploads(
         result = await db.execute(query)
         media_uploads = result.scalars().all()
         
-        uploads = [MediaUploadResponse.model_validate(mu).model_dump() for mu in media_uploads]
+        # Generate presigned URLs for each media upload
+        s3_service = get_s3_service()
+        
+        uploads = []
+        for mu in media_uploads:
+            response = MediaUploadResponse.model_validate(mu)
+            # Generate presigned URL for secure access
+            if mu.s3_key:
+                try:
+                    response.presigned_url = s3_service.generate_presigned_download_url(
+                        s3_key=mu.s3_key,
+                        expires_in=3600  # 1 hour
+                    )
+                except Exception as e:
+                    print(f"Failed to generate presigned URL for media {mu.id}: {e}")
+            uploads.append(response.model_dump())
         
         return StandardResponse(
             data=uploads,

@@ -164,7 +164,6 @@ class AssignedWorkoutResponse(BaseModel):
     """Response schema for assigned workout."""
     id: UUID
     workout_id: UUID
-    coach_client_relationship_id: UUID
     coach_user_id: UUID
     client_user_id: UUID
     assigned_date: date

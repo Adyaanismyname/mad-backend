@@ -11,7 +11,6 @@ class MediaUploadCreate(BaseModel):
     exercise_id: UUID
     media_url: str = Field(..., min_length=1)
     media_type: str = Field(..., pattern="^(video|image)$")
-    s3_key: Optional[str] = None  # S3 object key for file management
 
 
 class MediaUploadInitiate(BaseModel):
@@ -26,8 +25,6 @@ class MediaUploadInitiate(BaseModel):
 class PresignedUploadResponse(BaseModel):
     """Response schema for presigned upload URL."""
     upload_url: str = Field(..., description="Presigned URL for uploading file")
-    media_url: str = Field(..., description="Final URL to use when confirming upload")
-    s3_key: str = Field(..., description="S3 object key")
     content_type: str = Field(..., description="Content type to use in upload request")
     expires_at: str = Field(..., description="ISO timestamp when URL expires")
     upload_id: UUID = Field(..., description="Temporary ID to confirm upload")
@@ -46,7 +43,7 @@ class MediaUploadResponse(BaseModel):
     client_user_id: UUID
     assigned_workout_id: Optional[UUID] = None
     exercise_id: UUID
-    media_url: str
+    presigned_url: Optional[str] = Field(None, description="Presigned URL for secure media access (expires in 1 hour)")
     media_type: str
     status: Optional[str] = None
     created_at: datetime
@@ -97,7 +94,7 @@ class MediaWithFeedbackResponse(BaseModel):
     client_user_id: UUID
     assigned_workout_id: Optional[UUID] = None
     exercise_id: UUID
-    media_url: str
+    presigned_url: Optional[str] = Field(None, description="Presigned URL for secure media access (expires in 1 hour)")
     media_type: str
     status: Optional[str] = None
     created_at: datetime
