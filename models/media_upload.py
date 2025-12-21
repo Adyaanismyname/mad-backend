@@ -1,6 +1,7 @@
 from sqlalchemy import DateTime, ForeignKey, Text, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from db.base import Base
 from typing import Optional
@@ -26,6 +27,9 @@ class MediaUpload(Base):
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    
+    # Editing 
+    annotations: Mapped[Optional[dict]] = mapped_column(JSONB,nullable=True)
     
     # Relationships
     client_user = relationship("User", back_populates="media_uploads")

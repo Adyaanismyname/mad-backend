@@ -37,6 +37,27 @@ class MediaUploadConfirm(BaseModel):
     exercise_id: UUID
 
 
+class MediaAnnotationsUpdate(BaseModel):
+    """Schema for updating media annotations."""
+    annotations: dict = Field(..., description="JSON formatted annotations data")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "annotations": {
+                    "frames": [
+                        {
+                            "timestamp": 1.5,
+                            "markers": [{"x": 100, "y": 200, "label": "elbow"}]
+                        }
+                    ],
+                    "notes": "Form correction points"
+                }
+            }
+        }
+    )
+
+
 class MediaUploadResponse(BaseModel):
     """Response schema for media upload."""
     id: UUID
@@ -47,6 +68,7 @@ class MediaUploadResponse(BaseModel):
     media_type: str
     status: Optional[str] = None
     created_at: datetime
+    annotations: Optional[dict] = Field(None, description="annotation json file to keep track of annotations")
     
     model_config = ConfigDict(from_attributes=True)
 

@@ -2582,6 +2582,249 @@ Delete a media upload (Client who uploaded it only).
 
 ---
 
+### 3. Update Media Annotations
+
+**PATCH** `/feedback/media/{media_id}/annotations`
+
+Update annotations for a media upload. Only the client who uploaded the media can update its annotations.
+
+**Authentication:** Required (Client - Owner of the media)
+
+**Path Parameters:**
+
+- `media_id` (UUID): The ID of the media
+
+**Request Body:**
+
+```json
+{
+  "frames": [
+    {
+      "timestamp": 1.5,
+      "markers": [
+        {
+          "x": 100,
+          "y": 200,
+          "label": "elbow",
+          "color": "#FF5733"
+        },
+        {
+          "x": 150,
+          "y": 250,
+          "label": "shoulder",
+          "color": "#33FF57"
+        }
+      ]
+    },
+    {
+      "timestamp": 3.2,
+      "markers": [
+        {
+          "x": 110,
+          "y": 210,
+          "label": "elbow",
+          "color": "#FF5733"
+        }
+      ]
+    }
+  ],
+  "notes": "Form correction points - focus on elbow alignment",
+  "version": "1.0"
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "id": "123e4567-e89b-12d3-a456-426614174040",
+    "client_user_id": "123e4567-e89b-12d3-a456-426614174010",
+    "assigned_workout_id": "123e4567-e89b-12d3-a456-426614174020",
+    "exercise_id": "123e4567-e89b-12d3-a456-426614174000",
+    "presigned_url": "https://s3.amazonaws.com/bucket/video.mp4?signature=...",
+    "media_type": "video",
+    "status": "ready",
+    "created_at": "2025-11-12T10:00:00",
+    "annotations": {
+      "frames": [
+        {
+          "timestamp": 1.5,
+          "markers": [
+            {
+              "x": 100,
+              "y": 200,
+              "label": "elbow",
+              "color": "#FF5733"
+            }
+          ]
+        }
+      ],
+      "notes": "Form correction points - focus on elbow alignment",
+      "version": "1.0"
+    }
+  },
+  "message": "Annotations updated successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Annotations updated successfully
+- `400 Bad Request`: Invalid JSON or missing annotations data
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: Not authorized to update this media's annotations
+- `404 Not Found`: Media not found
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Annotations are stored as JSONB and can contain any structured data
+- Common use cases: timestamps, coordinates, markers, drawing paths, notes
+- The entire annotations object is replaced with each update (not merged)
+- Only the client who uploaded the media can update annotations
+- Presigned URL for the video is included in the response (expires in 1 hour)
+
+**Annotation Structure Guidelines:**
+
+The annotations field is flexible JSON, but here are recommended structures:
+
+```json
+{
+  "frames": [
+    {
+      "timestamp": 1.5,
+      "markers": [{ "x": 100, "y": 200, "label": "point", "color": "#FF0000" }],
+      "shapes": [
+        {
+          "type": "circle",
+          "center": { "x": 150, "y": 150 },
+          "radius": 20,
+          "color": "#00FF00"
+        }
+      ],
+      "paths": [
+        {
+          "points": [
+            { "x": 10, "y": 10 },
+            { "x": 20, "y": 20 }
+          ],
+          "color": "#0000FF",
+          "thickness": 2
+        }
+      ]
+    }
+  ],
+  "notes": "Overall feedback",
+  "metadata": {
+    "version": "1.0",
+    "created_by": "mobile_app_v2.1"
+  }
+}
+```
+
+---
+
+### 4. Get Media Annotations
+
+**GET** `/feedback/media/{media_id}/annotations`
+
+Retrieve annotations for a specific media upload.
+
+**Authentication:** Required (Client - Owner or Coach)
+
+**Path Parameters:**
+
+- `media_id` (UUID): The ID of the media
+
+**Response:**
+
+```json
+{
+  "data": {
+    "media_id": "123e4567-e89b-12d3-a456-426614174040",
+    "annotations": {
+      "frames": [
+        {
+          "timestamp": 1.5,
+          "markers": [
+            {
+              "x": 100,
+              "y": 200,
+              "label": "elbow",
+              "color": "#FF5733"
+            }
+          ]
+        }
+      ],
+      "notes": "Form correction points",
+      "version": "1.0"
+    },
+    "created_at": "2025-11-12T10:00:00"
+  },
+  "message": "Annotations retrieved successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Annotations retrieved successfully
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: Not authorized to view this media's annotations
+- `404 Not Found`: Media not found
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Clients can view annotations on their own uploads
+- Coaches can view annotations on their clients' uploads
+- Returns an empty object `{}` if no annotations exist
+- Requires active coach-client relationship for coaches
+
+---
+
+### 5. Generate Download URL
+
+**POST** `/feedback/media/{media_id}/generate-download-url`
+
+Generate a temporary download URL for a media file.
+
+**Authentication:** Required (Client - Owner or Coach)
+
+**Path Parameters:**
+
+- `media_id` (UUID): The ID of the media
+
+**Response:**
+
+```json
+{
+  "data": {
+    "download_url": "https://s3.amazonaws.com/bucket/video.mp4?signature=...",
+    "expires_in_seconds": 3600
+  },
+  "message": "Download URL generated successfully"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Download URL generated successfully
+- `400 Bad Request`: Media file does not have an S3 key
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: Not authorized to access this media
+- `404 Not Found`: Media not found
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Useful for private media files
+- Returns a presigned URL that expires after 1 hour
+- Clients can access their own media
+- Coaches can access their clients' media
+
+---
+
 ## Feedback Endpoints
 
 ### 1. Create Feedback

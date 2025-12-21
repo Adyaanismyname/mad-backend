@@ -232,7 +232,8 @@ async def confirm_media_upload(
             media_url=pending_upload.media_url,
             s3_key=pending_upload.s3_key,
             media_type=pending_upload.media_type,
-            status="ready"
+            status="ready",
+            annotations={}
         )
         
         db.add(media_upload)
