@@ -47,4 +47,8 @@ dependencies = [
     "boto3>=1.40.74",
     "six>=1.17.0",
     "requests>=2.32.5",
+    # TensorFlow for pose detection (MoveNet)
+    "tensorflow>=2.15.0",
+    "tensorflow-hub>=0.16.0",
+    "numpy>=1.26.0",
 ]

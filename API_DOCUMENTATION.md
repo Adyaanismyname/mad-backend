@@ -2825,6 +2825,137 @@ Generate a temporary download URL for a media file.
 
 ---
 
+## Automatic Pose Detection
+
+**Pose detection is automatic!** When you request video media through the Media Query endpoints, the backend automatically:
+
+1. Streams the video from S3 (no download)
+2. Extracts frames at 3 FPS
+3. Runs TensorFlow MoveNet Lightning pose detection
+4. Returns `pose_data` with the media response
+
+### Coordinate System
+
+**All coordinates are NORMALIZED (0-1 range)** for easy frontend scaling:
+
+```
+x_pixel = x * video_width
+y_pixel = y * video_height
+```
+
+This means the same pose data works at any video display size.
+
+### Keypoints Detected (17 total)
+
+- **Head**: nose, left_eye, right_eye, left_ear, right_ear
+- **Upper Body**: left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist
+- **Lower Body**: left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle
+
+### Pose Data Structure
+
+When you call `GET /feedback/media/my-uploads` or `GET /feedback/media/client/{client_id}`, video responses include:
+
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174040",
+  "media_type": "video",
+  "presigned_url": "https://...",
+  "pose_analysis_status": "completed",
+  "pose_data": {
+    "version": "1.0",
+    "model": "movenet_lightning",
+    "processed_at": "2026-01-14T10:00:00Z",
+    "video_info": {
+      "width": 1920,
+      "height": 1080,
+      "duration": 15.5
+    },
+    "settings": {
+      "fps": 3,
+      "frames_analyzed": 46,
+      "coordinate_system": "normalized",
+      "coordinate_note": "Multiply x by video width and y by video height to get pixel coordinates"
+    },
+    "keypoint_names": ["nose", "left_eye", "..."],
+    "skeleton_connections": [["nose", "left_eye"], ["left_shoulder", "left_elbow"], "..."],
+    "summary": {
+      "average_confidence": 0.82,
+      "total_frames": 46,
+      "detection_rate": 1.0
+    },
+    "frames": [
+      {
+        "timestamp": 0.0,
+        "frame_number": 0,
+        "keypoints": {
+          "nose": {"x": 0.52, "y": 0.18, "confidence": 0.95},
+          "left_shoulder": {"x": 0.42, "y": 0.35, "confidence": 0.91},
+          "right_shoulder": {"x": 0.62, "y": 0.34, "confidence": 0.89}
+        },
+        "confidence": 0.85
+      },
+      {
+        "timestamp": 0.333,
+        "frame_number": 1,
+        "keypoints": {"..."}
+      }
+    ]
+  }
+}
+```
+
+### Frontend Integration Example
+
+```javascript
+// Draw pose overlay on canvas
+function drawPose(ctx, poseData, videoElement) {
+  const videoWidth = videoElement.videoWidth;
+  const videoHeight = videoElement.videoHeight;
+  const currentTime = videoElement.currentTime;
+
+  // Find closest frame to current video time
+  const frame = poseData.frames.reduce((closest, f) => {
+    return Math.abs(f.timestamp - currentTime) <
+      Math.abs(closest.timestamp - currentTime)
+      ? f
+      : closest;
+  });
+
+  // Draw keypoints (convert normalized to pixels)
+  for (const [name, kp] of Object.entries(frame.keypoints)) {
+    if (kp.confidence > 0.3) {
+      const x = kp.x * videoWidth; // Normalized -> pixels
+      const y = kp.y * videoHeight;
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, 2 * Math.PI);
+      ctx.fillStyle = `rgba(255, 0, 0, ${kp.confidence})`;
+      ctx.fill();
+    }
+  }
+
+  // Draw skeleton lines
+  for (const [start, end] of poseData.skeleton_connections) {
+    const startKp = frame.keypoints[start];
+    const endKp = frame.keypoints[end];
+    if (
+      startKp &&
+      endKp &&
+      startKp.confidence > 0.3 &&
+      endKp.confidence > 0.3
+    ) {
+      ctx.beginPath();
+      ctx.moveTo(startKp.x * videoWidth, startKp.y * videoHeight);
+      ctx.lineTo(endKp.x * videoWidth, endKp.y * videoHeight);
+      ctx.strokeStyle = "rgba(0, 255, 0, 0.8)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+}
+```
+
+---
+
 ## Feedback Endpoints
 
 ### 1. Create Feedback

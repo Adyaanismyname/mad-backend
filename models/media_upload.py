@@ -4,7 +4,7 @@ from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from db.base import Base
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
 import uuid
 
@@ -24,6 +24,10 @@ class MediaUpload(Base):
     s3_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # S3 object key for file operations
     media_type: Mapped[str] = mapped_column(String)  # e.g., "video", "image"
     status: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # e.g., "processing", "ready", "failed"
+    
+    # Pose Detection Data
+    pose_data: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)  # AI-generated pose keypoints per frame
+    pose_analysis_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # e.g., "pending", "processing", "completed", "failed"
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

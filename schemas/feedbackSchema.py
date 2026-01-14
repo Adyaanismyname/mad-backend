@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Dict
 from datetime import datetime
 from uuid import UUID
 
@@ -69,6 +69,12 @@ class MediaUploadResponse(BaseModel):
     status: Optional[str] = None
     created_at: datetime
     annotations: Optional[dict] = Field(None, description="annotation json file to keep track of annotations")
+    pose_data: Optional[Any] = Field(
+        None, 
+        description="AI-generated pose keypoints per frame. Coordinates are NORMALIZED (0-1). "
+                    "Multiply x by video width and y by video height to get pixel coordinates."
+    )
+    pose_analysis_status: Optional[str] = Field(None, description="Status: completed, failed, or null if not processed")
     
     model_config = ConfigDict(from_attributes=True)
 

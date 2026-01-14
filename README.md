@@ -1,4 +1,3 @@
-
 # Gym-App Backend
 
 This repository contains the backend for the Gym-App project. This README documents how the API expects requests and responds, the standard response shape, examples, and simple testing steps.
@@ -8,6 +7,26 @@ This repository contains the backend for the Gym-App project. This README docume
 - Python 3.12+
 - Docker & Docker Compose
 - PostgreSQL (via Docker)
+- FFmpeg (for pose detection video processing)
+
+### Installing FFmpeg
+
+FFmpeg is required for the pose detection feature to stream and process videos from S3.
+
+**macOS:**
+
+```bash
+brew install ffmpeg
+```
+
+**Ubuntu/Debian:**
+
+```bash
+sudo apt update && sudo apt install ffmpeg
+```
+
+**Windows:**
+Download from https://ffmpeg.org/download.html and add to PATH.
 
 ## Installation & Setup
 
@@ -20,6 +39,7 @@ pip install -r requirements.txt
 ```
 
 **Key dependencies for this project:**
+
 - `fastapi` - Modern web framework for building APIs
 - `uvicorn` - ASGI server for running FastAPI
 - `sqlalchemy` - SQL toolkit and ORM
@@ -28,6 +48,8 @@ pip install -r requirements.txt
 - `pydantic` & `pydantic-settings` - Data validation and settings management
 - `email-validator` - Email validation for Pydantic
 - `python-dotenv` - Environment variable management
+- `tensorflow` & `tensorflow-hub` - AI/ML for pose detection (MoveNet)
+- `boto3` - AWS SDK for S3 integration
 
 ### 2. Start PostgreSQL Database (Docker)
 
@@ -48,6 +70,7 @@ docker-compose down -v
 ```
 
 The database will be available at:
+
 - Host: `localhost`
 - Port: `5432`
 - Database: `mydb`
@@ -71,6 +94,7 @@ SMTP_FROM=your_email@gmail.com
 ```
 
 **SMTP Setup Options:**
+
 - **Gmail**: Use `smtp.gmail.com:587` with an App Password
 - **SendGrid**: Use `smtp.sendgrid.net:587` with API key as password
 - **Mailgun**: Use `smtp.mailgun.org:587` with domain credentials
@@ -104,6 +128,7 @@ uv run uvicorn main:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 The API will be available at:
+
 - API: `http://localhost:8000`
 
 ## API response rules
@@ -112,19 +137,20 @@ All API endpoints in this project follow a consistent response format. This make
 
 - Successful response:
 
-	{
-		"data": { /* payload object, may be empty {} */ },
-		"message": "A short success message",
-	}
+  {
+  "data": { /_ payload object, may be empty {} _/ },
+  "message": "A short success message",
+  }
 
 - Error response:
 
-	{
-		"data": {},
-		"message": "A concise error message explaining what went wrong",
-	}
+  {
+  "data": {},
+  "message": "A concise error message explaining what went wrong",
+  }
 
 Notes:
+
 - `data` must always be present and be an object (use an empty object `{}` when there's no payload).
 - `message` should be a short human-readable string describing the result or error.
 - HTTP status codes are provided in the response header. The response body intentionally does not include `status` or `code` fields — use the HTTP status code from the header to determine success or failure.
@@ -135,9 +161,9 @@ Notes:
 - The main payload object should be provided in the request body. When the server returns a response, the returned `data` key will contain the payload returned by the server.
 - For POST/PUT requests, include the body as:
 
-	{
-		"data": { /* request payload */ }
-	}
+  {
+  "data": { /_ request payload _/ }
+  }
 
 - For GET requests, prefer query parameters for filtering and pagination. If your client sends a GET with a body (discouraged), the server may ignore it.
 - Content-Type header: `application/json` for requests with bodies.
@@ -147,55 +173,55 @@ Notes:
 
 - Create a new user (POST /users)
 
-	Request body:
+  Request body:
 
-	{
-		"data": {
-			"username": "jane",
-			"email": "jane@example.com",
-			"password": "strongpassword"
-		}
-	}
+  {
+  "data": {
+  "username": "jane",
+  "email": "jane@example.com",
+  "password": "strongpassword"
+  }
+  }
 
-	Successful response (201):
+  Successful response (201):
 
-	{
-		"data": {
-			"id": 123,
-			"username": "jane",
-			"email": "jane@example.com"
-		},
-		"message": "User created successfully"
-	}
+  {
+  "data": {
+  "id": 123,
+  "username": "jane",
+  "email": "jane@example.com"
+  },
+  "message": "User created successfully"
+  }
 
-	Error response (400):
+  Error response (400):
 
-	{
-		"data": {},
-		"message": "Email already in use"
-	}
+  {
+  "data": {},
+  "message": "Email already in use"
+  }
 
 - Example: Update an entity (PUT /entities/:id)
 
-	Request body:
+  Request body:
 
-	{
-		"data": {
-			"name": "Updated name",
-			"value": 42
-		}
-	}
+  {
+  "data": {
+  "name": "Updated name",
+  "value": 42
+  }
+  }
 
-	Response (200):
+  Response (200):
 
-	{
-		"data": {
-			"id": 42,
-			"name": "Updated name",
-			"value": 42
-		},
-		"message": "Entity updated"
-	}
+  {
+  "data": {
+  "id": 42,
+  "name": "Updated name",
+  "value": 42
+  },
+  "message": "Entity updated"
+  }
 
 ## Error handling best practices
 
@@ -218,6 +244,7 @@ except Exception as e:
 ```
 
 **Error Types:**
+
 - **503 Service Unavailable**: Database connection issues (`OperationalError`)
 - **500 Internal Server Error**: Unexpected errors with descriptive message
 - **401 Unauthorized**: Invalid or missing authentication token
@@ -251,6 +278,7 @@ This project uses Alembic for database schema migrations. Alembic tracks changes
 Purpose: Create a new migration file based on changes to your SQLAlchemy models.
 
 What happens:
+
 - Alembic compares your current models with the database schema
 - It generates a migration script describing the differences
 - The script is saved in `alembic/versions/` with a unique revision ID
@@ -263,6 +291,7 @@ What happens:
 Purpose: Actually apply all new migrations to your database.
 
 What happens:
+
 - Alembic runs all unapplied migration scripts in order
 - It updates your database schema
 - It records the last migration ID in the `alembic_version` table
@@ -282,6 +311,7 @@ python -m alembic upgrade head
 ```
 
 Alembic will:
+
 1. Create a new migration file describing the change
 2. Apply it to your actual Postgres database
 
@@ -391,6 +421,7 @@ You'll use this file to specify dependencies, as well as details about the proje
 ```
 Tip: See the official pyproject.toml guide for more details on getting started with the `pyproject.toml` format.
 ```
+
 You'll also use this file to specify uv configuration options in a `[tool.uv]` section.
 
 #### .python-version
@@ -493,6 +524,7 @@ uv run -- flask run -p 3000
 Or, to run a script:
 
 example.py
+
 ```python
 # Require a project dependency
 import flask
@@ -507,11 +539,13 @@ uv run example.py
 Alternatively, you can use `uv sync` to manually update the environment then activate it before executing a command:
 
 macOS and Linux
+
 ```bash
 uv sync
 ```
 
 Windows
+
 ```powershell
 .venv\Scripts\activate
 ```
@@ -538,9 +572,8 @@ uv build
 ls dist/
 ```
 
-
-
 See the documentation on building projects for more details.
+
 ## License
 
 This project license is not specified in this README. Add a `LICENSE` file if needed.
