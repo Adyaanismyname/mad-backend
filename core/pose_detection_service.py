@@ -149,13 +149,17 @@ class PoseDetectionService:
         }
     
     def _extract_frames(self, s3_url: str, video_info: Dict, fps: float, max_frames: int) -> List[Dict]:
-        """Extract frames from video using FFmpeg streaming."""
+        """Extract frames from video using FFmpeg streaming with optimization."""
         width, height = video_info['width'], video_info['height']
+        
+        # Calculate max duration to process (avoid processing entire long videos)
+        max_duration = max_frames / fps
         
         ffmpeg_cmd = [
             'ffmpeg',
             '-i', s3_url,
-            '-vf', f'fps={fps}',
+            '-t', str(max_duration),  # Limit input duration
+            '-vf', f'fps={fps},scale=w=min(iw\,640):h=-2',  # Downscale wide videos for faster processing
             '-f', 'image2pipe',
             '-pix_fmt', 'rgb24',
             '-vcodec', 'rawvideo',
@@ -171,7 +175,11 @@ class PoseDetectionService:
         )
         
         frames_data = []
-        frame_size = width * height * 3
+        # Use actual output dimensions after scale filter
+        actual_width = min(width, 640)
+        actual_height = (height * actual_width) // width if width > 640 else height
+        actual_height = actual_height + (actual_height % 2)  # Make even
+        frame_size = actual_width * actual_height * 3
         frame_count = 0
         
         while frame_count < max_frames:
@@ -179,7 +187,7 @@ class PoseDetectionService:
             if len(raw_frame) < frame_size:
                 break
             
-            frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((height, width, 3))
+            frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((actual_height, actual_width, 3))
             frames_data.append({
                 'frame': frame,
                 'timestamp': round(frame_count / fps, 3),
@@ -228,9 +236,11 @@ class PoseDetectionService:
         
         logger.info(f"Extracted {len(frames_data)} frames, running pose detection...")
         
-        # Process each frame
+        # Process frames with early success exit
         pose_frames = []
         all_confidences = []
+        consecutive_failures = 0
+        max_consecutive_failures = 5  # Stop if 5 consecutive frames fail
         
         for frame_data in frames_data:
             try:
@@ -242,7 +252,7 @@ class PoseDetectionService:
                     if kp['confidence'] >= min_confidence
                 }
                 
-                if filtered_keypoints:
+                if filtered_keypoints and pose_result['confidence'] >= min_confidence:
                     pose_frames.append({
                         'timestamp': frame_data['timestamp'],
                         'frame_number': frame_data['frame_number'],
@@ -250,9 +260,18 @@ class PoseDetectionService:
                         'confidence': pose_result['confidence']
                     })
                     all_confidences.append(pose_result['confidence'])
+                    consecutive_failures = 0  # Reset on success
+                else:
+                    consecutive_failures += 1
                     
             except Exception as e:
                 logger.warning(f"Failed to process frame {frame_data['frame_number']}: {e}")
+                consecutive_failures += 1
+            
+            # Early exit if too many consecutive failures (e.g., person left frame)
+            if consecutive_failures >= max_consecutive_failures and len(pose_frames) >= 10:
+                logger.info(f"Early exit: {consecutive_failures} consecutive failures, {len(pose_frames)} frames processed")
+                break
         
         if not pose_frames:
             raise Exception("Failed to detect pose in any frame")

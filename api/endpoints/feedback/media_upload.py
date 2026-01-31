@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status, Depends, HTTPException
+from fastapi import APIRouter, status, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
@@ -13,16 +13,82 @@ from schemas.feedbackSchema import (
 from schemas.core import StandardResponse
 from core.auth import verify_user_token
 from core.s3_service import get_s3_service
+from core.pose_detection_service import get_pose_detection_service
 from models.media_upload import MediaUpload
 from models.assigned_workout import AssignedWorkout
 from models.pending_upload import PendingUpload
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/media")
+
+
+async def process_pose_detection_background(media_id: UUID, s3_key: str):
+    """
+    Background task to process pose detection for newly uploaded videos.
+    Runs asynchronously after upload confirmation to avoid blocking the response.
+    """
+    try:
+        logger.info(f"[BACKGROUND] Starting pose detection for media {media_id}")
+        
+        # Get database session
+        from db.session import SessionLocal
+        async with SessionLocal() as db:
+            # Fetch media record
+            result = await db.execute(
+                select(MediaUpload).filter(MediaUpload.id == media_id)
+            )
+            media = result.scalar_one_or_none()
+            
+            if not media or media.media_type != "video":
+                logger.info(f"[BACKGROUND] Skipping pose detection for media {media_id} (not a video or not found)")
+                return
+            
+            # Skip if already processed
+            if media.pose_analysis_status == "completed":
+                logger.info(f"[BACKGROUND] Pose detection already completed for media {media_id}")
+                return
+            
+            # Update status to processing
+            media.pose_analysis_status = "processing"
+            await db.commit()
+            
+            try:
+                # Get presigned URL
+                s3_service = get_s3_service()
+                presigned_url = s3_service.generate_presigned_download_url(
+                    s3_key=s3_key,
+                    expires_in=3600
+                )
+                
+                # Run pose detection with optimized settings
+                pose_service = get_pose_detection_service()
+                pose_data = pose_service.analyze_video_from_s3(
+                    s3_url=presigned_url,
+                    fps=2.0,        # Reduced from 3.0 for faster processing
+                    max_frames=40,  # Reduced from 60 for faster processing
+                    min_confidence=0.3  # Increased threshold to filter low-quality detections
+                )
+                
+                # Save results
+                media.pose_data = pose_data
+                media.pose_analysis_status = "completed"
+                await db.commit()
+                
+                logger.info(f"[BACKGROUND] Successfully completed pose detection for media {media_id}")
+                
+            except Exception as e:
+                logger.error(f"[BACKGROUND] Failed to process pose data for media {media_id}: {e}")
+                media.pose_analysis_status = "failed"
+                media.pose_data = {"error": str(e), "processed_at": datetime.now(timezone.utc).isoformat()}
+                await db.commit()
+                
+    except Exception as e:
+        logger.error(f"[BACKGROUND] Error in background pose detection task: {e}")
 
 
 @router.post("/initiate-upload", response_model=StandardResponse, status_code=status.HTTP_200_OK)
@@ -145,6 +211,7 @@ async def initiate_media_upload(
 @router.post("/confirm-upload", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
 async def confirm_media_upload(
     confirm_data: MediaUploadConfirm,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(verify_user_token),
     db: AsyncSession = Depends(get_db)
 ):
@@ -245,10 +312,19 @@ async def confirm_media_upload(
         await db.commit()
         await db.refresh(media_upload)
         
+        # Trigger background pose detection for videos
+        if media_upload.media_type == "video" and media_upload.s3_key:
+            background_tasks.add_task(
+                process_pose_detection_background,
+                media_upload.id,
+                media_upload.s3_key
+            )
+            logger.info(f"[UPLOAD] Scheduled background pose detection for media {media_upload.id}")
+        
         response = MediaUploadResponse.model_validate(media_upload)
         return StandardResponse(
             data=response.model_dump(),
-            message="Media upload confirmed successfully"
+            message="Media upload confirmed successfully. Pose detection will be processed in the background."
         )
         
     except HTTPException:

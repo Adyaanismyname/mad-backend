@@ -19,77 +19,51 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/media")
 
 
-async def process_pose_data_for_video(media: MediaUpload, s3_service, db: AsyncSession) -> Optional[dict]:
+async def get_pose_data_summary(pose_data: Optional[dict], include_frames: bool = False) -> Optional[dict]:
     """
-    Process pose detection for a video if not already done.
-    Returns pose_data and saves it to the database.
+    Return optimized pose data based on client needs.
+    By default, only returns summary without full frame data to reduce payload size.
     """
-    # Skip if not a video
-    if media.media_type != "video":
+    if not pose_data:
         return None
     
-    # Return cached pose data if available
-    if media.pose_data and media.pose_analysis_status == "completed":
-        logger.info(f"[POSE DATA] Returning cached pose data for media {media.id}")
-        logger.info(f"[POSE DATA] Summary: {json.dumps(media.pose_data.get('summary', {}), indent=2)}")
-        return media.pose_data
-    
-    # Skip if no S3 key
-    if not media.s3_key:
-        logger.warning(f"[POSE DATA] No S3 key for media {media.id}, skipping pose detection")
-        return None
-    
-    try:
-        logger.info(f"[POSE DATA] Processing pose detection for media {media.id}...")
-        
-        # Get presigned URL for video
-        presigned_url = s3_service.generate_presigned_download_url(
-            s3_key=media.s3_key,
-            expires_in=3600
-        )
-        
-        # Run pose detection
-        pose_service = get_pose_detection_service()
-        pose_data = pose_service.analyze_video_from_s3(
-            s3_url=presigned_url,
-            fps=3.0,      # 3 frames per second
-            max_frames=60,  # Max 60 frames (20 seconds of video)
-            min_confidence=0.2
-        )
-        
-        # Save to database
-        media.pose_data = pose_data
-        media.pose_analysis_status = "completed"
-        await db.commit()
-        
-        # Log the pose data
-        logger.info(f"[POSE DATA] Successfully processed pose data for media {media.id}")
-        logger.info(f"[POSE DATA] Video info: {json.dumps(pose_data.get('video_info', {}), indent=2)}")
-        logger.info(f"[POSE DATA] Summary: {json.dumps(pose_data.get('summary', {}), indent=2)}")
-        logger.info(f"[POSE DATA] First frame keypoints: {json.dumps(pose_data.get('frames', [{}])[0], indent=2)}")
-        
+    if include_frames:
         return pose_data
-        
-    except Exception as e:
-        logger.error(f"[POSE DATA] Failed to process pose data for media {media.id}: {e}")
-        media.pose_analysis_status = "failed"
-        media.pose_data = {"error": str(e)}
-        await db.commit()
-        return None
+    
+    # Return lightweight summary without frame-by-frame data
+    return {
+        "version": pose_data.get("version"),
+        "model": pose_data.get("model"),
+        "processed_at": pose_data.get("processed_at"),
+        "video_info": pose_data.get("video_info"),
+        "settings": pose_data.get("settings"),
+        "summary": pose_data.get("summary"),
+        "keypoint_names": pose_data.get("keypoint_names"),
+        "skeleton_connections": pose_data.get("skeleton_connections"),
+        "frame_count": len(pose_data.get("frames", [])),
+        "note": "Full frame data available via include_pose_frames=true query parameter"
+    }
 
 
 @router.get("/my-uploads", response_model=StandardResponse)
 async def get_my_media_uploads(
     assigned_workout_id: Optional[UUID] = Query(None, description="Filter by assigned workout"),
     exercise_id: Optional[UUID] = Query(None, description="Filter by exercise"),
+    include_pose_frames: bool = Query(False, description="Include full frame-by-frame pose data (increases payload size)"),
     current_user: dict = Depends(verify_user_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get all media uploads for the authenticated client.
     
-    For videos, pose detection is automatically processed and returned with the response.
+    For videos, pose detection runs in background after upload. Check pose_analysis_status:
+    - 'pending': Not yet started
+    - 'processing': Currently analyzing
+    - 'completed': Data available in pose_data
+    - 'failed': Processing failed
+    
     Pose coordinates are normalized (0-1) - multiply by video dimensions to get pixels.
+    Use include_pose_frames=true to get full frame-by-frame data (increases response size).
     
     Returns: {"data": [media_uploads], "message": "Media uploads retrieved"}
     Errors: 401 (unauthorized), 500 (server error)
@@ -114,11 +88,11 @@ async def get_my_media_uploads(
         
         uploads = []
         for mu in media_uploads:
-            # Process pose data for videos automatically
-            if mu.media_type == "video":
-                await process_pose_data_for_video(mu, s3_service, db)
-            
             response = MediaUploadResponse.model_validate(mu)
+            
+            # Optimize pose data payload
+            if mu.media_type == "video" and mu.pose_data:
+                response.pose_data = await get_pose_data_summary(mu.pose_data, include_pose_frames)
             
             # Generate presigned URL for secure access
             if mu.s3_key:
@@ -150,6 +124,7 @@ async def get_client_media_uploads(
     client_id: UUID,
     assigned_workout_id: Optional[UUID] = Query(None, description="Filter by assigned workout"),
     exercise_id: Optional[UUID] = Query(None, description="Filter by exercise"),
+    include_pose_frames: bool = Query(False, description="Include full frame-by-frame pose data (increases payload size)"),
     current_user: dict = Depends(verify_user_token),
     db: AsyncSession = Depends(get_db)
 ):
@@ -157,8 +132,9 @@ async def get_client_media_uploads(
     Get media uploads from a specific client (Coach only).
     
     Only coaches who have an active relationship with the client can view their media.
-    For videos, pose detection is automatically processed and returned with the response.
+    For videos, pose detection runs in background after upload. Check pose_analysis_status.
     Pose coordinates are normalized (0-1) - multiply by video dimensions to get pixels.
+    Use include_pose_frames=true to get full frame-by-frame data (increases response size).
     
     Returns: {"data": [media_uploads], "message": "Client media retrieved"}
     Errors: 401 (unauthorized), 403 (forbidden), 500 (server error)
@@ -187,11 +163,11 @@ async def get_client_media_uploads(
         
         uploads = []
         for mu in media_uploads:
-            # Process pose data for videos automatically
-            if mu.media_type == "video":
-                await process_pose_data_for_video(mu, s3_service, db)
-            
             response = MediaUploadResponse.model_validate(mu)
+            
+            # Optimize pose data payload
+            if mu.media_type == "video" and mu.pose_data:
+                response.pose_data = await get_pose_data_summary(mu.pose_data, include_pose_frames)
             
             # Generate presigned URL for secure access
             if mu.s3_key:
@@ -214,6 +190,73 @@ async def get_client_media_uploads(
         raise
     except Exception as e:
         logger.error(f"Error getting client media: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )
+
+
+@router.get("/{media_id}/pose-data", response_model=StandardResponse)
+async def get_pose_data(
+    media_id: UUID,
+    include_frames: bool = Query(True, description="Include full frame-by-frame data"),
+    current_user: dict = Depends(verify_user_token),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get pose detection data for a specific media upload.
+    
+    This endpoint allows fetching pose data separately from the media list,
+    useful for on-demand loading of detailed pose information.
+    
+    Returns pose_analysis_status: 'pending', 'processing', 'completed', or 'failed'
+    
+    Returns: {"data": {pose_data}, "message": "Pose data retrieved"}
+    Errors: 401 (unauthorized), 403 (forbidden), 404 (not found), 500 (server error)
+    """
+    try:
+        user_id = UUID(str(current_user.get("user_id")))
+        user_role = current_user.get("role")
+        
+        # Fetch media
+        result = await db.execute(
+            select(MediaUpload).filter(MediaUpload.id == media_id)
+        )
+        media = result.scalar_one_or_none()
+        
+        if not media:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media not found"
+            )
+        
+        # Authorization check
+        if user_role == "client":
+            if media.client_user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to access this media"
+                )
+        elif user_role == "coach":
+            await verify_coach_client_relationship(user_id, media.client_user_id, db)
+        
+        # Return pose data with status
+        response_data = {
+            "media_id": str(media.id),
+            "media_type": media.media_type,
+            "pose_analysis_status": media.pose_analysis_status or "pending",
+            "pose_data": await get_pose_data_summary(media.pose_data, include_frames) if media.pose_data else None
+        }
+        
+        return StandardResponse(
+            data=response_data,
+            message=f"Pose data retrieved (status: {media.pose_analysis_status or 'pending'})"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pose data: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"

@@ -2423,8 +2423,11 @@ Get all media uploads for the authenticated client.
 
 - `assigned_workout_id` (UUID, optional): Filter by assigned workout
 - `exercise_id` (UUID, optional): Filter by exercise
+- `include_pose_frames` (boolean, optional, default: `false`): Include full frame-by-frame pose data. When `false` (default), only a lightweight summary is returned to reduce payload size by ~85%.
 
 **Example:** `/feedback/media/my-uploads?exercise_id=123e4567-e89b-12d3-a456-426614174000`
+
+**Example with full pose data:** `/feedback/media/my-uploads?include_pose_frames=true`
 
 **Response:**
 
@@ -2439,11 +2442,13 @@ Get all media uploads for the authenticated client.
       "media_url": "https://s3.amazonaws.com/bucket/video.mp4",
       "media_type": "video",
       "status": "ready",
+      "pose_analysis_status": "completed",
       "created_at": "2025-11-12T10:00:00"
     }
   ],
   "message": "Media uploads retrieved successfully"
 }
+```
 ```
 
 **Status Codes:**
@@ -2470,6 +2475,7 @@ Get media uploads from a specific client (Coach only).
 
 - `assigned_workout_id` (UUID, optional): Filter by assigned workout
 - `exercise_id` (UUID, optional): Filter by exercise
+- `include_pose_frames` (boolean, optional, default: `false`): Include full frame-by-frame pose data. When `false` (default), only a lightweight summary is returned to reduce payload size by ~85%.
 
 **Response:**
 
@@ -2484,6 +2490,7 @@ Get media uploads from a specific client (Coach only).
       "media_url": "https://s3.amazonaws.com/bucket/video.mp4",
       "media_type": "video",
       "status": "ready",
+      "pose_analysis_status": "completed",
       "created_at": "2025-11-12T10:00:00"
     }
   ],
@@ -2501,6 +2508,70 @@ Get media uploads from a specific client (Coach only).
 **Notes:**
 
 - Only coaches with an active relationship with the client can view their media
+
+---
+
+### 3. Get Pose Data for Media
+
+**GET** `/feedback/media/{media_id}/pose-data`
+
+Get pose detection data for a specific media upload. Use this endpoint to fetch pose data on-demand without loading the full media list.
+
+**Authentication:** Required (Coach or Client)
+
+**Path Parameters:**
+
+- `media_id` (UUID): The ID of the media
+
+**Query Parameters:**
+
+- `include_frames` (boolean, optional, default: `true`): Include full frame-by-frame pose data. Set to `false` for a lightweight summary.
+
+**Example:** `/feedback/media/123e4567-e89b-12d3-a456-426614174040/pose-data`
+
+**Example (summary only):** `/feedback/media/123e4567-e89b-12d3-a456-426614174040/pose-data?include_frames=false`
+
+**Response:**
+
+```json
+{
+  "data": {
+    "media_id": "123e4567-e89b-12d3-a456-426614174040",
+    "media_type": "video",
+    "pose_analysis_status": "completed",
+    "pose_data": {
+      "version": "1.0",
+      "model": "movenet_lightning",
+      "summary": {
+        "average_confidence": 0.85,
+        "total_frames": 40,
+        "detection_rate": 0.95
+      },
+      "video_info": {
+        "width": 1920,
+        "height": 1080,
+        "duration": 20.5
+      },
+      "frames": [...]
+    }
+  },
+  "message": "Pose data retrieved (status: completed)"
+}
+```
+
+**Status Codes:**
+
+- `200 OK`: Pose data retrieved successfully
+- `401 Unauthorized`: Not authenticated
+- `403 Forbidden`: Not authorized to access this media
+- `404 Not Found`: Media not found
+- `500 Internal Server Error`: Server error
+
+**Notes:**
+
+- Clients can access pose data for their own media
+- Coaches can access pose data for their clients' media
+- Check `pose_analysis_status` to verify if processing is complete
 
 ---
 
@@ -2827,12 +2898,78 @@ Generate a temporary download URL for a media file.
 
 ## Automatic Pose Detection
 
-**Pose detection is automatic!** When you request video media through the Media Query endpoints, the backend automatically:
+### Overview
 
-1. Streams the video from S3 (no download)
-2. Extracts frames at 3 FPS
-3. Runs TensorFlow MoveNet Lightning pose detection
-4. Returns `pose_data` with the media response
+Pose detection is **automatic and runs in the background** after video upload confirmation. This provides:
+- **Instant upload responses** (<1 second)
+- **Non-blocking processing** (8-12 seconds in background)
+- **Status tracking** via `pose_analysis_status` field
+
+### Processing Workflow
+
+1. Client uploads video → Confirms upload
+2. API returns immediately with `pose_analysis_status: "pending"`
+3. Background task processes pose detection (8-12 seconds)
+4. Status updates to `"completed"` when ready
+
+### Pose Analysis Status Values
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Processing not yet started |
+| `processing` | Currently analyzing video |
+| `completed` | Pose data available |
+| `failed` | Processing encountered an error |
+
+### Payload Optimization
+
+**Default responses are lightweight** (~5-20KB per video instead of ~150KB).
+
+By default, `pose_data` returns only a summary without frame-by-frame keypoints. Use query parameters to control payload size:
+
+| Endpoint | Parameter | Effect |
+|----------|-----------|--------|
+| `GET /feedback/media/my-uploads` | `include_pose_frames=true` | Returns full frame data |
+| `GET /feedback/media/client/{id}` | `include_pose_frames=true` | Returns full frame data |
+| `GET /feedback/media/{id}/pose-data` | `include_frames=true` | Returns full frame data |
+
+**Lightweight Summary Response (default):**
+```json
+{
+  "pose_data": {
+    "version": "1.0",
+    "model": "movenet_lightning",
+    "summary": {
+      "average_confidence": 0.85,
+      "total_frames": 40,
+      "detection_rate": 0.95
+    },
+    "video_info": {"width": 1920, "height": 1080, "duration": 20.5},
+    "frame_count": 40,
+    "note": "Full frames via include_pose_frames=true"
+  }
+}
+```
+
+**Full Frame Data Response (with `include_pose_frames=true`):**
+```json
+{
+  "pose_data": {
+    "...summary fields...",
+    "frames": [
+      {
+        "timestamp": 0.0,
+        "frame_number": 0,
+        "keypoints": {
+          "nose": {"x": 0.52, "y": 0.18, "confidence": 0.95},
+          "left_shoulder": {"x": 0.42, "y": 0.35, "confidence": 0.91}
+        },
+        "confidence": 0.85
+      }
+    ]
+  }
+}
+```
 
 ### Coordinate System
 
@@ -2851,9 +2988,9 @@ This means the same pose data works at any video display size.
 - **Upper Body**: left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist
 - **Lower Body**: left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle
 
-### Pose Data Structure
+### Full Pose Data Structure
 
-When you call `GET /feedback/media/my-uploads` or `GET /feedback/media/client/{client_id}`, video responses include:
+When you call `GET /feedback/media/my-uploads?include_pose_frames=true` or `GET /feedback/media/client/{client_id}?include_pose_frames=true`, video responses include:
 
 ```json
 {
@@ -2871,8 +3008,8 @@ When you call `GET /feedback/media/my-uploads` or `GET /feedback/media/client/{c
       "duration": 15.5
     },
     "settings": {
-      "fps": 3,
-      "frames_analyzed": 46,
+      "fps": 2,
+      "frames_analyzed": 40,
       "coordinate_system": "normalized",
       "coordinate_note": "Multiply x by video width and y by video height to get pixel coordinates"
     },
@@ -2880,7 +3017,7 @@ When you call `GET /feedback/media/my-uploads` or `GET /feedback/media/client/{c
     "skeleton_connections": [["nose", "left_eye"], ["left_shoulder", "left_elbow"], "..."],
     "summary": {
       "average_confidence": 0.82,
-      "total_frames": 46,
+      "total_frames": 40,
       "detection_rate": 1.0
     },
     "frames": [
@@ -2895,7 +3032,7 @@ When you call `GET /feedback/media/my-uploads` or `GET /feedback/media/client/{c
         "confidence": 0.85
       },
       {
-        "timestamp": 0.333,
+        "timestamp": 0.5,
         "frame_number": 1,
         "keypoints": {"..."}
       }
@@ -2903,6 +3040,13 @@ When you call `GET /feedback/media/my-uploads` or `GET /feedback/media/client/{c
   }
 }
 ```
+
+### Best Practices for Frontend
+
+1. **Check status first**: Always check `pose_analysis_status` before accessing `pose_data`
+2. **Use lightweight responses**: Don't use `include_pose_frames=true` unless needed
+3. **Load on-demand**: Use `/feedback/media/{id}/pose-data` to fetch detailed pose data only when viewing a specific video
+4. **Poll for completion**: If status is `"processing"`, poll every 2-3 seconds until `"completed"`
 
 ### Frontend Integration Example
 
