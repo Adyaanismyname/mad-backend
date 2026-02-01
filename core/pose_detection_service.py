@@ -18,8 +18,11 @@ import numpy as np
 import subprocess
 import json
 import logging
+import shutil
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +84,27 @@ class PoseDetectionService:
         self._model = None
         self._movenet = None
         self.input_size = 192  # Lightning model input size
+        self.ffmpeg_path = settings.FFMPEG_PATH
+        self.ffprobe_path = settings.FFPROBE_PATH
+        self._check_ffmpeg_availability()
         logger.info("PoseDetectionService initialized")
+    
+    def _check_ffmpeg_availability(self) -> None:
+        """Check if FFmpeg and FFprobe are available."""
+        ffmpeg_available = shutil.which(self.ffmpeg_path) is not None
+        ffprobe_available = shutil.which(self.ffprobe_path) is not None
+        
+        if not ffmpeg_available:
+            logger.warning(
+                f"FFmpeg not found at '{self.ffmpeg_path}'. "
+                "Please install FFmpeg or set FFMPEG_PATH in .env file. "
+            )
+        
+        if not ffprobe_available:
+            logger.warning(
+                f"FFprobe not found at '{self.ffprobe_path}'. "
+                "Please install FFmpeg (includes FFprobe) or set FFPROBE_PATH in .env file. "
+            )
     
     @property
     def model(self):
@@ -129,8 +152,14 @@ class PoseDetectionService:
     
     def _get_video_info(self, s3_url: str) -> Dict[str, Any]:
         """Get video metadata using ffprobe."""
+        if not shutil.which(self.ffprobe_path):
+            raise FileNotFoundError(
+                f"FFprobe executable not found at '{self.ffprobe_path}'. "
+                "Set FFPROBE_PATH in your .env file to the full path of ffprobe.exe"
+            )
+        
         ffprobe_cmd = [
-            'ffprobe',
+            self.ffprobe_path,
             '-v', 'error',
             '-select_streams', 'v:0',
             '-show_entries', 'stream=width,height,duration,r_frame_rate',
@@ -138,7 +167,15 @@ class PoseDetectionService:
             s3_url
         ]
         
-        result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, timeout=30)
+        try:
+            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, timeout=30, check=True)
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"FFprobe failed: {e.stderr}")
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"FFprobe executable not found. Please install FFmpeg and ensure it's in your PATH. "
+                f"Tried to execute: {self.ffprobe_path}"
+            )
         probe_data = json.loads(result.stdout)
         stream_info = probe_data.get('streams', [{}])[0]
         
@@ -150,13 +187,19 @@ class PoseDetectionService:
     
     def _extract_frames(self, s3_url: str, video_info: Dict, fps: float, max_frames: int) -> List[Dict]:
         """Extract frames from video using FFmpeg streaming with optimization."""
+        if not shutil.which(self.ffmpeg_path):
+            raise FileNotFoundError(
+                f"FFmpeg executable not found at '{self.ffmpeg_path}'. "
+                "Set FFMPEG_PATH in your .env file to the full path of ffmpeg.exe"
+            )
+        
         width, height = video_info['width'], video_info['height']
         
         # Calculate max duration to process (avoid processing entire long videos)
         max_duration = max_frames / fps
         
         ffmpeg_cmd = [
-            'ffmpeg',
+            self.ffmpeg_path,
             '-i', s3_url,
             '-t', str(max_duration),  # Limit input duration
             '-vf', f'fps={fps},scale=w=min(iw\,640):h=-2',  # Downscale wide videos for faster processing
@@ -167,12 +210,18 @@ class PoseDetectionService:
             '-'
         ]
         
-        process = subprocess.Popen(
-            ffmpeg_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=10**8
-        )
+        try:
+            process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=10**8
+            )
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"FFmpeg executable not found. Please install FFmpeg and ensure it's in your PATH. "
+                f"Tried to execute: {self.ffmpeg_path}"
+            )
         
         frames_data = []
         # Use actual output dimensions after scale filter
@@ -182,21 +231,26 @@ class PoseDetectionService:
         frame_size = actual_width * actual_height * 3
         frame_count = 0
         
-        while frame_count < max_frames:
-            raw_frame = process.stdout.read(frame_size)
-            if len(raw_frame) < frame_size:
-                break
-            
-            frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((actual_height, actual_width, 3))
-            frames_data.append({
-                'frame': frame,
-                'timestamp': round(frame_count / fps, 3),
-                'frame_number': frame_count
-            })
-            frame_count += 1
-        
-        process.terminate()
-        process.wait(timeout=5)
+        try:
+            while frame_count < max_frames:
+                raw_frame = process.stdout.read(frame_size)
+                if len(raw_frame) < frame_size:
+                    break
+                
+                frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((actual_height, actual_width, 3))
+                frames_data.append({
+                    'frame': frame,
+                    'timestamp': round(frame_count / fps, 3),
+                    'frame_number': frame_count
+                })
+                frame_count += 1
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
         
         return frames_data
     

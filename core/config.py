@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     BUCKET_NAME: str | None = None
     ENVIRONMENT: str | None = None
     S3_PRESIGN_EXPIRES: int = 3600  # seconds
+    
+    # FFmpeg settings for pose detection
+    FFMPEG_PATH: str = "ffmpeg"  
+    FFPROBE_PATH: str = "ffprobe"  
         
 
 settings = Settings()  # type: ignore[call-arg]

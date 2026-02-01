@@ -66,8 +66,10 @@ async def process_pose_detection_background(media_id: UUID, s3_key: str):
                 )
                 
                 # Run pose detection with optimized settings
+                # Use asyncio.to_thread to offload blocking CPU work to thread pool
                 pose_service = get_pose_detection_service()
-                pose_data = pose_service.analyze_video_from_s3(
+                pose_data = await asyncio.to_thread(
+                    pose_service.analyze_video_from_s3,
                     s3_url=presigned_url,
                     fps=2.0,        # Reduced from 3.0 for faster processing
                     max_frames=40,  # Reduced from 60 for faster processing
