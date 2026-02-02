@@ -18,6 +18,7 @@ from models.media_upload import MediaUpload
 from models.assigned_workout import AssignedWorkout
 from models.pending_upload import PendingUpload
 from uuid import UUID, uuid4
+import asyncio
 from datetime import datetime, timezone
 import logging
 import asyncio
@@ -35,8 +36,9 @@ async def process_pose_detection_background(media_id: UUID, s3_key: str):
     try:
         logger.info(f"[BACKGROUND] Starting pose detection for media {media_id}")
         
-        # Get database session
+        # Get database session - import here to avoid circular imports
         from db.session import SessionLocal
+        
         async with SessionLocal() as db:
             # Fetch media record
             result = await db.execute(
@@ -57,6 +59,8 @@ async def process_pose_detection_background(media_id: UUID, s3_key: str):
             media.pose_analysis_status = "processing"
             await db.commit()
             
+            logger.info(f"[BACKGROUND] Updated status to 'processing' for media {media_id}")
+            
             try:
                 # Get presigned URL
                 s3_service = get_s3_service()
@@ -65,15 +69,18 @@ async def process_pose_detection_background(media_id: UUID, s3_key: str):
                     expires_in=3600
                 )
                 
+                logger.info(f"[BACKGROUND] Generated presigned URL (length: {len(presigned_url)})")
+                
                 # Run pose detection with optimized settings
                 # Use asyncio.to_thread to offload blocking CPU work to thread pool
                 pose_service = get_pose_detection_service()
                 pose_data = await asyncio.to_thread(
                     pose_service.analyze_video_from_s3,
                     s3_url=presigned_url,
-                    fps=2.0,        # Reduced from 3.0 for faster processing
-                    max_frames=40,  # Reduced from 60 for faster processing
-                    min_confidence=0.3  # Increased threshold to filter low-quality detections
+                    fps=10.0,           # 10fps for smooth playback
+                    max_frames=1200,    # Up to 1200 frames (2 min at 10fps)
+                    max_duration=120.0, # Process up to 2 minutes
+                    min_confidence=0.25 # Balanced threshold
                 )
                 
                 # Save results
@@ -84,13 +91,13 @@ async def process_pose_detection_background(media_id: UUID, s3_key: str):
                 logger.info(f"[BACKGROUND] Successfully completed pose detection for media {media_id}")
                 
             except Exception as e:
-                logger.error(f"[BACKGROUND] Failed to process pose data for media {media_id}: {e}")
+                logger.error(f"[BACKGROUND] Failed to process pose data for media {media_id}: {e}", exc_info=True)
                 media.pose_analysis_status = "failed"
                 media.pose_data = {"error": str(e), "processed_at": datetime.now(timezone.utc).isoformat()}
                 await db.commit()
                 
     except Exception as e:
-        logger.error(f"[BACKGROUND] Error in background pose detection task: {e}")
+        logger.error(f"[BACKGROUND] Error in background pose detection task: {e}", exc_info=True)
 
 
 @router.post("/initiate-upload", response_model=StandardResponse, status_code=status.HTTP_200_OK)
@@ -314,14 +321,11 @@ async def confirm_media_upload(
         await db.commit()
         await db.refresh(media_upload)
         
-        # Trigger background pose detection for videos
+        # Set pose detection status to pending for videos - will be processed by background worker
         if media_upload.media_type == "video" and media_upload.s3_key:
-            background_tasks.add_task(
-                process_pose_detection_background,
-                media_upload.id,
-                media_upload.s3_key
-            )
-            logger.info(f"[UPLOAD] Scheduled background pose detection for media {media_upload.id}")
+            media_upload.pose_analysis_status = "pending"
+            await db.commit()
+            logger.info(f"[UPLOAD] Video uploaded, pose detection status set to 'pending' for media {media_upload.id}")
         
         response = MediaUploadResponse.model_validate(media_upload)
         return StandardResponse(
@@ -426,3 +430,83 @@ async def upload_media_direct(
             detail=f"An error occurred: {str(e)}"
         )
 
+
+@router.post("/{media_id}/retry-pose-detection", response_model=StandardResponse)
+async def retry_pose_detection(
+    media_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(verify_user_token),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually retry pose detection for a failed or pending video.
+    
+    Use this to reprocess videos that failed or were uploaded before optimizations.
+    
+    Returns: {"data": {media_data}, "message": "Pose detection scheduled"}
+    Errors: 400, 401, 403, 404, 500
+    """
+    try:
+        client_user_id = UUID(str(current_user.get("user_id")))
+        
+        # Fetch media
+        result = await db.execute(
+            select(MediaUpload).filter(MediaUpload.id == media_id)
+        )
+        media = result.scalar_one_or_none()
+        
+        if not media:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media not found"
+            )
+        
+        # Only owner can retry
+        if media.client_user_id != client_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to retry pose detection for this media"
+            )
+        
+        # Must be a video
+        if media.media_type != "video":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pose detection is only available for videos"
+            )
+        
+        # Must have S3 key
+        if not media.s3_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Media file not found in S3"
+            )
+        
+        # Reset status
+        media.pose_analysis_status = "pending"
+        media.pose_data = None
+        await db.commit()
+        
+        # Schedule background processing
+        background_tasks.add_task(
+            process_pose_detection_background,
+            media.id,
+            media.s3_key
+        )
+        
+        logger.info(f"[RETRY] Scheduled pose detection retry for media {media_id}")
+        
+        response = MediaUploadResponse.model_validate(media)
+        return StandardResponse(
+            data=response.model_dump(),
+            message="Pose detection scheduled. Check back in a few seconds."
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrying pose detection: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )

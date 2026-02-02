@@ -185,7 +185,7 @@ class PoseDetectionService:
             'duration': float(stream_info.get('duration', 0))
         }
     
-    def _extract_frames(self, s3_url: str, video_info: Dict, fps: float, max_frames: int) -> List[Dict]:
+    def _extract_frames(self, s3_url: str, video_info: Dict, fps: float, max_frames: int, max_duration: float = None) -> List[Dict]:
         """Extract frames from video using FFmpeg streaming with optimization."""
         if not shutil.which(self.ffmpeg_path):
             raise FileNotFoundError(
@@ -194,19 +194,27 @@ class PoseDetectionService:
             )
         
         width, height = video_info['width'], video_info['height']
+        video_duration = video_info.get('duration', 0)
         
-        # Calculate max duration to process (avoid processing entire long videos)
-        max_duration = max_frames / fps
+        # Use full video duration, capped by max_duration if provided
+        # If video duration unknown, fall back to max_frames / fps
+        if video_duration > 0:
+            process_duration = min(video_duration, max_duration) if max_duration else video_duration
+        else:
+            process_duration = max_duration if max_duration else (max_frames / fps)
         
+        logger.info(f"[POSE] Processing {process_duration:.1f}s of video at {fps} fps")
+        
+        # Simple frame extraction without complex scaling
         ffmpeg_cmd = [
             self.ffmpeg_path,
             '-i', s3_url,
-            '-t', str(max_duration),  # Limit input duration
-            '-vf', f'fps={fps},scale=w=min(iw\,640):h=-2',  # Downscale wide videos for faster processing
+            '-t', str(process_duration),  # Process full duration (or capped)
+            '-vf', f'fps={fps}',  # Extract at specified FPS
             '-f', 'image2pipe',
             '-pix_fmt', 'rgb24',
             '-vcodec', 'rawvideo',
-            '-loglevel', 'error',
+            '-loglevel', 'warning',  # Show warnings to help debug
             '-'
         ]
         
@@ -224,12 +232,10 @@ class PoseDetectionService:
             )
         
         frames_data = []
-        # Use actual output dimensions after scale filter
-        actual_width = min(width, 640)
-        actual_height = (height * actual_width) // width if width > 640 else height
-        actual_height = actual_height + (actual_height % 2)  # Make even
-        frame_size = actual_width * actual_height * 3
+        frame_size = width * height * 3
         frame_count = 0
+        
+        logger.info(f"[POSE] Extracting frames: {width}x{height}, frame_size={frame_size}")
         
         try:
             while frame_count < max_frames:
@@ -237,7 +243,7 @@ class PoseDetectionService:
                 if len(raw_frame) < frame_size:
                     break
                 
-                frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((actual_height, actual_width, 3))
+                frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((height, width, 3))
                 frames_data.append({
                     'frame': frame,
                     'timestamp': round(frame_count / fps, 3),
@@ -257,8 +263,9 @@ class PoseDetectionService:
     def analyze_video_from_s3(
         self,
         s3_url: str,
-        fps: float = 3.0,
-        max_frames: int = 60,
+        fps: float = 10.0,
+        max_frames: int = 1200,
+        max_duration: float = 120.0,
         min_confidence: float = 0.2
     ) -> Dict[str, Any]:
         """
@@ -269,21 +276,30 @@ class PoseDetectionService:
         
         Args:
             s3_url: Presigned S3 URL for the video
-            fps: Frames per second to analyze (default: 3)
-            max_frames: Maximum frames to process (default: 60)
+            fps: Frames per second to analyze (default: 10 for smooth playback)
+            max_frames: Maximum frames to process (default: 1200 = 2 min at 10fps)
+            max_duration: Maximum video duration to process in seconds (default: 120s)
             min_confidence: Minimum confidence threshold (default: 0.2)
         
         Returns:
             Pose data dict with normalized coordinates
         """
-        logger.info(f"Starting pose analysis (fps={fps}, max_frames={max_frames})")
+        logger.info(f"Starting pose analysis (fps={fps}, max_duration={max_duration}s, max_frames={max_frames})")
         
         # Get video info
         video_info = self._get_video_info(s3_url)
-        logger.info(f"Video: {video_info['width']}x{video_info['height']}, duration: {video_info['duration']}s")
+        video_duration = video_info.get('duration', 0)
+        logger.info(f"Video: {video_info['width']}x{video_info['height']}, duration: {video_duration}s")
         
-        # Extract frames
-        frames_data = self._extract_frames(s3_url, video_info, fps, max_frames)
+        # Calculate how many frames we'll actually need for this video
+        effective_duration = min(video_duration, max_duration) if video_duration > 0 else max_duration
+        expected_frames = int(effective_duration * fps)
+        actual_max_frames = min(expected_frames, max_frames)
+        
+        logger.info(f"[POSE] Will process ~{actual_max_frames} frames for {effective_duration:.1f}s of video")
+        
+        # Extract frames - pass max_duration to process full video
+        frames_data = self._extract_frames(s3_url, video_info, fps, actual_max_frames, max_duration)
         
         if not frames_data:
             raise Exception("No frames could be extracted from the video")
