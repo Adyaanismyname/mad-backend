@@ -1,7 +1,7 @@
-from fastapi import APIRouter, status, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, status, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select
+from sqlalchemy import select, func
 from db.session import get_db
 from schemas.feedbackSchema import (
     MediaUploadCreate,
@@ -18,6 +18,7 @@ from models.media_upload import MediaUpload
 from models.assigned_workout import AssignedWorkout
 from models.pending_upload import PendingUpload
 from uuid import UUID, uuid4
+from typing import Optional
 import asyncio
 from datetime import datetime, timezone
 import logging
@@ -26,6 +27,104 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/media")
+
+VIDEO_UPLOAD_LIMIT_OVERALL = 10
+VIDEO_UPLOAD_LIMIT_PER_EXERCISE = 2
+
+
+async def get_video_upload_counts(
+    db: AsyncSession,
+    user_id: UUID,
+    exercise_id: Optional[UUID] = None,
+    exclude_pending_id: Optional[UUID] = None
+) -> dict:
+    now = datetime.now(timezone.utc)
+
+    overall_media_query = select(func.count()).select_from(MediaUpload).filter(
+        MediaUpload.client_user_id == user_id,
+        MediaUpload.media_type == "video"
+    )
+    overall_pending_query = select(func.count()).select_from(PendingUpload).filter(
+        PendingUpload.user_id == user_id,
+        PendingUpload.media_type == "video",
+        PendingUpload.status == "pending",
+        PendingUpload.deleted_at.is_(None),
+        PendingUpload.expires_at > now
+    )
+
+    per_ex_media_query = select(func.count()).select_from(MediaUpload).filter(
+        MediaUpload.client_user_id == user_id,
+        MediaUpload.media_type == "video"
+    )
+    per_ex_pending_query = select(func.count()).select_from(PendingUpload).filter(
+        PendingUpload.user_id == user_id,
+        PendingUpload.media_type == "video",
+        PendingUpload.status == "pending",
+        PendingUpload.deleted_at.is_(None),
+        PendingUpload.expires_at > now
+    )
+
+    if exercise_id:
+        per_ex_media_query = per_ex_media_query.filter(MediaUpload.exercise_id == exercise_id)
+        per_ex_pending_query = per_ex_pending_query.filter(PendingUpload.exercise_id == exercise_id)
+
+    if exclude_pending_id:
+        overall_pending_query = overall_pending_query.filter(PendingUpload.id != exclude_pending_id)
+        per_ex_pending_query = per_ex_pending_query.filter(PendingUpload.id != exclude_pending_id)
+
+    overall_media_result = await db.execute(overall_media_query)
+    overall_pending_result = await db.execute(overall_pending_query)
+    per_ex_media_result = await db.execute(per_ex_media_query)
+    per_ex_pending_result = await db.execute(per_ex_pending_query)
+
+    overall_count = (overall_media_result.scalar_one() or 0) + (overall_pending_result.scalar_one() or 0)
+    per_exercise_count = (per_ex_media_result.scalar_one() or 0) + (per_ex_pending_result.scalar_one() or 0)
+
+    return {
+        "overall": overall_count,
+        "per_exercise": per_exercise_count
+    }
+
+
+async def enforce_video_upload_limits(
+    db: AsyncSession,
+    user_id: UUID,
+    exercise_id: UUID,
+    media_type: str,
+    exclude_pending_id: Optional[UUID] = None
+):
+    if media_type != "video":
+        return
+
+    counts = await get_video_upload_counts(
+        db=db,
+        user_id=user_id,
+        exercise_id=exercise_id,
+        exclude_pending_id=exclude_pending_id
+    )
+
+    if counts["overall"] >= VIDEO_UPLOAD_LIMIT_OVERALL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Overall video upload limit reached",
+                "limit": VIDEO_UPLOAD_LIMIT_OVERALL,
+                "current_count": counts["overall"],
+                "scope": "overall"
+            }
+        )
+
+    if counts["per_exercise"] >= VIDEO_UPLOAD_LIMIT_PER_EXERCISE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Per-exercise video upload limit reached",
+                "limit": VIDEO_UPLOAD_LIMIT_PER_EXERCISE,
+                "current_count": counts["per_exercise"],
+                "scope": "exercise",
+                "exercise_id": str(exercise_id)
+            }
+        )
 
 
 async def process_pose_detection_background(media_id: UUID, s3_key: str):
@@ -153,6 +252,13 @@ async def initiate_media_upload(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Assigned workout not found or not authorized"
                 )
+
+        await enforce_video_upload_limits(
+            db=db,
+            user_id=client_user_id,
+            exercise_id=upload_data.exercise_id,
+            media_type=upload_data.media_type
+        )
         
         # Get S3 service
         s3_service = get_s3_service()
@@ -202,8 +308,29 @@ async def initiate_media_upload(
             upload_id=upload_id
         )
         
+        # Include upload limits in response so frontend stays informed
+        updated_counts = await get_video_upload_counts(
+            db=db, user_id=client_user_id, exercise_id=upload_data.exercise_id
+        )
+        upload_limits = {
+            "overall": {
+                "used": updated_counts["overall"],
+                "limit": VIDEO_UPLOAD_LIMIT_OVERALL,
+                "remaining": max(0, VIDEO_UPLOAD_LIMIT_OVERALL - updated_counts["overall"])
+            },
+            "exercise": {
+                "used": updated_counts["per_exercise"],
+                "limit": VIDEO_UPLOAD_LIMIT_PER_EXERCISE,
+                "remaining": max(0, VIDEO_UPLOAD_LIMIT_PER_EXERCISE - updated_counts["per_exercise"]),
+                "exercise_id": str(upload_data.exercise_id)
+            }
+        }
+        
+        resp = response_data.model_dump()
+        resp["upload_limits"] = upload_limits
+        
         return StandardResponse(
-            data=response_data.model_dump(),
+            data=resp,
             message="Presigned upload URL generated successfully. Use the upload_url to PUT your file."
         )
         
@@ -272,6 +399,14 @@ async def confirm_media_upload(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to confirm this upload"
             )
+
+        await enforce_video_upload_limits(
+            db=db,
+            user_id=client_user_id,
+            exercise_id=confirm_data.exercise_id,
+            media_type=pending_upload.media_type,
+            exclude_pending_id=confirm_data.upload_id
+        )
         
         # Verify file exists in S3
         s3_service = get_s3_service()
@@ -328,8 +463,30 @@ async def confirm_media_upload(
             logger.info(f"[UPLOAD] Video uploaded, pose detection status set to 'pending' for media {media_upload.id}")
         
         response = MediaUploadResponse.model_validate(media_upload)
+        
+        # Include upload limits in response
+        updated_counts = await get_video_upload_counts(
+            db=db, user_id=client_user_id, exercise_id=confirm_data.exercise_id
+        )
+        upload_limits = {
+            "overall": {
+                "used": updated_counts["overall"],
+                "limit": VIDEO_UPLOAD_LIMIT_OVERALL,
+                "remaining": max(0, VIDEO_UPLOAD_LIMIT_OVERALL - updated_counts["overall"])
+            },
+            "exercise": {
+                "used": updated_counts["per_exercise"],
+                "limit": VIDEO_UPLOAD_LIMIT_PER_EXERCISE,
+                "remaining": max(0, VIDEO_UPLOAD_LIMIT_PER_EXERCISE - updated_counts["per_exercise"]),
+                "exercise_id": str(confirm_data.exercise_id)
+            }
+        }
+        
+        resp = response.model_dump()
+        resp["upload_limits"] = upload_limits
+        
         return StandardResponse(
-            data=response.model_dump(),
+            data=resp,
             message="Media upload confirmed successfully. Pose detection will be processed in the background."
         )
         
@@ -388,6 +545,13 @@ async def upload_media_direct(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Assigned workout not found or not authorized"
                 )
+
+        await enforce_video_upload_limits(
+            db=db,
+            user_id=client_user_id,
+            exercise_id=media_data.exercise_id,
+            media_type=media_data.media_type
+        )
         
         # Extract s3_key from media_url
         s3_service = get_s3_service()
@@ -409,8 +573,30 @@ async def upload_media_direct(
         await db.refresh(media_upload)
         
         response = MediaUploadResponse.model_validate(media_upload)
+        
+        # Include upload limits in response
+        updated_counts = await get_video_upload_counts(
+            db=db, user_id=client_user_id, exercise_id=media_data.exercise_id
+        )
+        upload_limits = {
+            "overall": {
+                "used": updated_counts["overall"],
+                "limit": VIDEO_UPLOAD_LIMIT_OVERALL,
+                "remaining": max(0, VIDEO_UPLOAD_LIMIT_OVERALL - updated_counts["overall"])
+            },
+            "exercise": {
+                "used": updated_counts["per_exercise"],
+                "limit": VIDEO_UPLOAD_LIMIT_PER_EXERCISE,
+                "remaining": max(0, VIDEO_UPLOAD_LIMIT_PER_EXERCISE - updated_counts["per_exercise"]),
+                "exercise_id": str(media_data.exercise_id)
+            }
+        }
+        
+        resp = response.model_dump()
+        resp["upload_limits"] = upload_limits
+        
         return StandardResponse(
-            data=response.model_dump(),
+            data=resp,
             message="Media uploaded successfully"
         )
         
@@ -506,6 +692,69 @@ async def retry_pose_detection(
         raise
     except Exception as e:
         logger.error(f"Error retrying pose detection: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )
+
+
+@router.get("/upload-limits", response_model=StandardResponse)
+async def get_upload_limits(
+    exercise_id: Optional[UUID] = Query(None, description="Exercise ID to check per-exercise limits for"),
+    current_user: dict = Depends(verify_user_token),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get the current video upload limits and usage for the authenticated client.
+    
+    Returns overall and per-exercise counts, limits, and remaining capacity.
+    If exercise_id is provided, per-exercise counts are for that specific exercise.
+    
+    Returns: {
+        "data": {
+            "overall": { "used": N, "limit": 10, "remaining": M },
+            "exercise": { "used": N, "limit": 2, "remaining": M, "exercise_id": "..." } | null
+        },
+        "message": "..."
+    }
+    """
+    try:
+        client_user_id = UUID(str(current_user.get("user_id")))
+
+        counts = await get_video_upload_counts(
+            db=db,
+            user_id=client_user_id,
+            exercise_id=exercise_id
+        )
+
+        overall_remaining = max(0, VIDEO_UPLOAD_LIMIT_OVERALL - counts["overall"])
+        data = {
+            "overall": {
+                "used": counts["overall"],
+                "limit": VIDEO_UPLOAD_LIMIT_OVERALL,
+                "remaining": overall_remaining
+            },
+            "exercise": None
+        }
+
+        if exercise_id:
+            per_ex_remaining = max(0, VIDEO_UPLOAD_LIMIT_PER_EXERCISE - counts["per_exercise"])
+            data["exercise"] = {
+                "used": counts["per_exercise"],
+                "limit": VIDEO_UPLOAD_LIMIT_PER_EXERCISE,
+                "remaining": per_ex_remaining,
+                "exercise_id": str(exercise_id)
+            }
+
+        return StandardResponse(
+            data=data,
+            message="Upload limits retrieved successfully"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting upload limits: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred: {str(e)}"

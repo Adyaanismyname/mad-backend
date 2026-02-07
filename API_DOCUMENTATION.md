@@ -21,9 +21,10 @@ http://localhost:8000
 9. [Workout Assignment Endpoints](#workout-assignment-endpoints)
 10. [Workout Exercise Management](#workout-exercise-management)
 11. [Media Upload Endpoints](#media-upload-endpoints)
-12. [Media Query Endpoints](#media-query-endpoints)
-13. [Media Management Endpoints](#media-management-endpoints)
-14. [Feedback Endpoints](#feedback-endpoints)
+12. [Video Upload Limits](#video-upload-limits)
+13. [Media Query Endpoints](#media-query-endpoints)
+14. [Media Management Endpoints](#media-management-endpoints)
+15. [Feedback Endpoints](#feedback-endpoints)
 
 ---
 
@@ -1732,6 +1733,14 @@ The backend implements a **two-step presigned URL workflow** for uploading worko
 - **Images**: `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp` - Max 10 MB
 - **Videos**: `.mp4`, `.mov`, `.avi`, `.webm`, `.mkv` - Max 100 MB
 
+**Video Upload Limits:**
+
+- ⚠️ **Max 2 videos per exercise** - A client can upload at most 2 videos for any single exercise
+- ⚠️ **Max 10 videos overall** - A client can upload at most 10 videos total across all exercises
+- ℹ️ Image uploads are **not** subject to these limits
+- ℹ️ Limits count both confirmed uploads and in-progress (pending) uploads to prevent race conditions
+- ✅ Use the **Upload Limits** endpoint to check remaining capacity before uploading
+
 ---
 
 ### 1. Initiate Upload (Get Presigned URL)
@@ -1774,7 +1783,20 @@ Request a presigned S3 URL for uploading a media file. This validates your file 
     "s3_key": "videos/550e8400-e29b-41d4-a716-446655440000/123e4567-e89b-12d3-a456-426614174000/20251203_143022_workout_video.mp4",
     "content_type": "video/mp4",
     "expires_at": "2025-12-03T15:30:22Z",
-    "upload_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+    "upload_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "upload_limits": {
+      "overall": {
+        "used": 3,
+        "limit": 10,
+        "remaining": 7
+      },
+      "exercise": {
+        "used": 1,
+        "limit": 2,
+        "remaining": 1,
+        "exercise_id": "123e4567-e89b-12d3-a456-426614174000"
+      }
+    }
   },
   "message": "Presigned upload URL generated successfully. Use the upload_url to PUT your file."
 }
@@ -1790,6 +1812,7 @@ Request a presigned S3 URL for uploading a media file. This validates your file 
 | `content_type` | MIME type to use in upload headers                            |
 | `expires_at`   | ISO timestamp when upload_url expires (1 hour from now)       |
 | `upload_id`    | **SAVE THIS** - needed for confirmation in Step 3             |
+| `upload_limits` | Current video upload usage and remaining capacity (see below) |
 
 **Status Codes:**
 
@@ -1797,14 +1820,17 @@ Request a presigned S3 URL for uploading a media file. This validates your file 
 - `400 Bad Request` - Invalid file type, size, or missing fields
 - `401 Unauthorized` - Not authenticated or invalid token
 - `403 Forbidden` - `assigned_workout_id` doesn't belong to you
+- `409 Conflict` - Video upload limit reached (overall or per-exercise). See [Upload Limits](#video-upload-limits) for details
 - `500 Internal Server Error` - Server or AWS S3 error
 
 **Important Notes:**
 
 - ⚠️ **URL expires in 1 hour** - If it expires, request a new one
 - ⚠️ **Don't modify the upload_url** - Any changes will invalidate the signature
+- ⚠️ **Video limits enforced here** - If the client has reached 2 videos for this exercise or 10 overall, this request is rejected before generating a presigned URL
 - ✅ **Save the `upload_id`** - You need it for Step 3 (confirm)
 - ✅ **File validation happens here** - Invalid files rejected before upload
+- ✅ **Check `upload_limits` in response** - Use this to show remaining capacity in your UI
 
 ---
 
@@ -1966,9 +1992,22 @@ After successfully uploading to S3 (Step 2), confirm the upload to create the da
     "media_url": "https://bucket.s3.us-east-1.amazonaws.com/videos/...",
     "media_type": "video",
     "status": "ready",
-    "created_at": "2025-12-03T14:31:00Z"
+    "created_at": "2025-12-03T14:31:00Z",
+    "upload_limits": {
+      "overall": {
+        "used": 4,
+        "limit": 10,
+        "remaining": 6
+      },
+      "exercise": {
+        "used": 2,
+        "limit": 2,
+        "remaining": 0,
+        "exercise_id": "123e4567-e89b-12d3-a456-426614174000"
+      }
+    }
   },
-  "message": "Media upload confirmed successfully"
+  "message": "Media upload confirmed successfully. Pose detection will be processed in the background."
 }
 ```
 
@@ -1979,6 +2018,7 @@ After successfully uploading to S3 (Step 2), confirm the upload to create the da
 - `401 Unauthorized` - Not authenticated
 - `403 Forbidden` - Upload_id belongs to different user or invalid workout
 - `404 Not Found` - File not found in S3 (Step 2 didn't complete)
+- `409 Conflict` - Video upload limit reached (overall or per-exercise). This can happen if another upload was confirmed between initiate and confirm
 - `422 Unprocessable Entity` - Invalid exercise_id or assigned_workout_id
 - `500 Internal Server Error` - Server error
 
@@ -1986,9 +2026,10 @@ After successfully uploading to S3 (Step 2), confirm the upload to create the da
 
 1. ✅ Validates `upload_id` exists and hasn't expired
 2. ✅ Verifies you're the user who initiated the upload
-3. ✅ Checks file actually exists in S3
-4. ✅ Creates permanent `MediaUpload` database record
-5. ✅ Marks pending upload as confirmed (audit trail)
+3. ✅ **Re-checks video upload limits** (in case another upload was confirmed in the meantime)
+4. ✅ Checks file actually exists in S3
+5. ✅ Creates permanent `MediaUpload` database record
+6. ✅ Marks pending upload as confirmed (audit trail)
 
 ---
 
@@ -2024,7 +2065,20 @@ After successfully uploading to S3 (Step 2), confirm the upload to create the da
     "media_url": "https://bucket.s3.amazonaws.com/videos/my-file.mp4",
     "media_type": "video",
     "status": "ready",
-    "created_at": "2025-12-03T14:00:00Z"
+    "created_at": "2025-12-03T14:00:00Z",
+    "upload_limits": {
+      "overall": {
+        "used": 5,
+        "limit": 10,
+        "remaining": 5
+      },
+      "exercise": {
+        "used": 1,
+        "limit": 2,
+        "remaining": 1,
+        "exercise_id": "123e4567-e89b-12d3-a456-426614174000"
+      }
+    }
   },
   "message": "Media uploaded successfully"
 }
@@ -2035,8 +2089,175 @@ After successfully uploading to S3 (Step 2), confirm the upload to create the da
 - `201 Created` - Media record created
 - `401 Unauthorized` - Not authenticated
 - `403 Forbidden` - Unauthorized access to workout
+- `409 Conflict` - Video upload limit reached (overall or per-exercise)
 - `422 Unprocessable Entity` - Invalid exercise or workout ID
 - `500 Internal Server Error` - Server error
+
+---
+
+### 5. Check Upload Limits
+
+**GET** `/feedback/media/upload-limits`
+
+Check the current video upload limits and usage for the authenticated client. Use this to proactively check remaining capacity before starting an upload.
+
+**Authentication:** Required (Client role)
+
+**Query Parameters:**
+
+| Field         | Type | Required    | Description                                 |
+| ------------- | ---- | ----------- | ------------------------------------------- |
+| `exercise_id` | UUID | ❌ Optional | Exercise to check per-exercise limits for   |
+
+**Example:** `/feedback/media/upload-limits?exercise_id=123e4567-e89b-12d3-a456-426614174000`
+
+**Response (200 OK):**
+
+```json
+{
+  "data": {
+    "overall": {
+      "used": 3,
+      "limit": 10,
+      "remaining": 7
+    },
+    "exercise": {
+      "used": 1,
+      "limit": 2,
+      "remaining": 1,
+      "exercise_id": "123e4567-e89b-12d3-a456-426614174000"
+    }
+  },
+  "message": "Upload limits retrieved successfully"
+}
+```
+
+**Response without `exercise_id`:**
+
+```json
+{
+  "data": {
+    "overall": {
+      "used": 3,
+      "limit": 10,
+      "remaining": 7
+    },
+    "exercise": null
+  },
+  "message": "Upload limits retrieved successfully"
+}
+```
+
+**Response Field Descriptions:**
+
+| Field                    | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| `overall.used`           | Total confirmed + in-progress video uploads      |
+| `overall.limit`          | Maximum allowed videos overall (currently 10)    |
+| `overall.remaining`      | How many more videos can be uploaded              |
+| `exercise.used`          | Videos uploaded for this specific exercise        |
+| `exercise.limit`         | Max videos per exercise (currently 2)            |
+| `exercise.remaining`     | How many more videos for this exercise           |
+| `exercise.exercise_id`   | The exercise these counts refer to               |
+
+**Status Codes:**
+
+- `200 OK` - Limits retrieved successfully
+- `401 Unauthorized` - Not authenticated
+- `500 Internal Server Error` - Server error
+
+**Notes:**
+
+- Counts include both confirmed `MediaUpload` records and active `PendingUpload` records (in-flight presigned URLs that haven't expired)
+- Only `video` media type is counted — image uploads are unlimited
+- Use this endpoint before showing the upload button to disable it when limits are reached
+
+---
+
+## Video Upload Limits
+
+The backend enforces per-client video upload limits to manage storage and ensure fair usage.
+
+### Limits
+
+| Scope        | Limit | Description                                      |
+| ------------ | ----- | ------------------------------------------------ |
+| **Overall**  | 10    | Maximum total videos a client can upload          |
+| **Exercise** | 2     | Maximum videos per exercise per client            |
+
+### How Limits Are Enforced
+
+Limits are checked at **every upload entry point**:
+
+1. **`POST /feedback/media/initiate-upload`** — Checked before generating the presigned URL (prevents wasted S3 uploads)
+2. **`POST /feedback/media/confirm-upload`** — Re-checked before creating the DB record (catches race conditions)
+3. **`POST /feedback/media`** (direct upload) — Checked before creating the DB record
+
+### What Counts Toward Limits
+
+- ✅ Confirmed `MediaUpload` records with `media_type = "video"`
+- ✅ Active `PendingUpload` records (status = `"pending"`, not expired, not deleted) — this prevents a client from initiating 10+ uploads simultaneously
+- ❌ Expired or failed pending uploads are **not** counted
+- ❌ Image uploads (`media_type = "image"`) are **not** counted
+
+### 409 Conflict Error Response
+
+When a limit is exceeded, the API returns `409 Conflict` with a structured error:
+
+**Overall limit exceeded:**
+
+```json
+{
+  "detail": {
+    "message": "Overall video upload limit reached",
+    "limit": 10,
+    "current_count": 10,
+    "scope": "overall"
+  }
+}
+```
+
+**Per-exercise limit exceeded:**
+
+```json
+{
+  "detail": {
+    "message": "Per-exercise video upload limit reached",
+    "limit": 2,
+    "current_count": 2,
+    "scope": "exercise",
+    "exercise_id": "123e4567-e89b-12d3-a456-426614174000"
+  }
+}
+```
+
+**Error Field Descriptions:**
+
+| Field           | Description                                              |
+| --------------- | -------------------------------------------------------- |
+| `message`       | Human-readable error message                             |
+| `limit`         | The maximum allowed count                                |
+| `current_count` | How many the client currently has                        |
+| `scope`         | `"overall"` or `"exercise"` — which limit was hit       |
+| `exercise_id`   | (exercise scope only) The exercise that hit the limit    |
+
+### Frontend Handling Recommendations
+
+```javascript
+try {
+  const result = await initiateUpload(file, exerciseId, assignedWorkoutId);
+  // Use result.data.upload_limits to update UI
+} catch (error) {
+  if (error.status === 409) {
+    const detail = error.response.detail;
+    if (detail.scope === "overall") {
+      showError(`You've reached the maximum of ${detail.limit} videos. Delete some videos to upload more.`);
+    } else if (detail.scope === "exercise") {
+      showError(`This exercise already has ${detail.limit} videos. Delete an existing video first.`);
+    }
+  }
+}
+```
 
 ---
 
@@ -2061,6 +2282,17 @@ class MediaUploader {
     try {
       // Validate file before starting
       this.validateFile(file);
+
+      // Pre-check: verify upload limits for videos
+      if (file.type.startsWith("video/")) {
+        const limits = await this.checkUploadLimits(exerciseId);
+        if (limits.overall.remaining <= 0) {
+          throw new Error(`Upload limit reached: maximum ${limits.overall.limit} videos allowed (you have ${limits.overall.used})`);
+        }
+        if (limits.exercise && limits.exercise.remaining <= 0) {
+          throw new Error(`Exercise limit reached: maximum ${limits.exercise.limit} videos per exercise (this exercise has ${limits.exercise.used})`);
+        }
+      }
 
       // Step 1: Initiate upload - get presigned URL
       console.log("Step 1: Requesting presigned URL...");
@@ -2091,6 +2323,26 @@ class MediaUploader {
   }
 
   /**
+   * Check upload limits before starting an upload
+   */
+  async checkUploadLimits(exerciseId) {
+    const url = exerciseId
+      ? `${this.apiBaseUrl}/feedback/media/upload-limits?exercise_id=${exerciseId}`
+      : `${this.apiBaseUrl}/feedback/media/upload-limits`;
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${this.authToken}` },
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to check upload limits");
+    }
+
+    const result = await response.json();
+    return result.data;
+  }
+
+  /**
    * Step 1: Request presigned URL from backend
    */
   async initiateUpload(file, exerciseId, assignedWorkoutId) {
@@ -2117,10 +2369,20 @@ class MediaUploader {
 
     if (!response.ok) {
       const error = await response.json();
+      // Handle 409 upload limit errors specifically
+      if (response.status === 409) {
+        const detail = error.detail;
+        if (detail.scope === "overall") {
+          throw new Error(`Upload limit reached: maximum ${detail.limit} videos allowed (you have ${detail.current_count})`);
+        } else {
+          throw new Error(`Exercise limit reached: maximum ${detail.limit} videos per exercise (this exercise has ${detail.current_count})`);
+        }
+      }
       throw new Error(error.detail || "Failed to initiate upload");
     }
 
     const result = await response.json();
+    // result.data.upload_limits contains current usage after this upload
     return result.data;
   }
 
@@ -2347,8 +2609,10 @@ async function uploadWithRetry(
       // Don't retry on validation errors (4xx)
       if (
         error.message.includes("Invalid file") ||
+        error.message.includes("limit reached") ||
         error.message.includes("400") ||
-        error.message.includes("403")
+        error.message.includes("403") ||
+        error.message.includes("409")
       ) {
         throw error;
       }
@@ -2375,6 +2639,8 @@ async function uploadWithRetry(
 | **403 Forbidden on S3 upload** | Wrong Content-Type or expired URL       | Use exact `content_type` from Step 1, request new URL if expired |
 | **404 on confirm**             | File didn't upload to S3                | Check Step 2 response was 200, verify network connection         |
 | **400 Invalid file type**      | Wrong file extension or too large       | Validate client-side before Step 1                               |
+| **409 Conflict on initiate**   | Video upload limit reached              | Check `detail.scope` for `"overall"` or `"exercise"`, show appropriate message. Use `/upload-limits` endpoint to check before uploading |
+| **409 Conflict on confirm**    | Another upload confirmed in the meantime | Rare race condition — inform user and check limits again          |
 | **Upload hangs**               | Network issue or CORS problem           | Implement timeout, check S3 bucket CORS config                   |
 | **Progress stuck at 0%**       | Using fetch() instead of XMLHttpRequest | Use XMLHttpRequest or libraries with progress support            |
 
