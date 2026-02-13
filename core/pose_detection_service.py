@@ -151,16 +151,24 @@ class PoseDetectionService:
         }
     
     def _get_video_info(self, s3_url: str) -> Dict[str, Any]:
-        """Get video metadata using ffprobe."""
+        """Get video metadata using ffprobe with optimized settings for fast S3 probing."""
+        logger.info("[POSE] 📊 Stage 1/3: Fetching video metadata...")
+        
         if not shutil.which(self.ffprobe_path):
             raise FileNotFoundError(
                 f"FFprobe executable not found at '{self.ffprobe_path}'. "
                 "Set FFPROBE_PATH in your .env file to the full path of ffprobe.exe"
             )
         
+        # Optimized ffprobe command for fast S3 probing
+        # -probesize 5M: Only read first 5MB (default is 5MB but explicit is better)
+        # -analyzeduration 5M: Analyze only first 5 seconds of data
+        # This makes probing S3 URLs much faster
         ffprobe_cmd = [
             self.ffprobe_path,
             '-v', 'error',
+            '-probesize', '5M',  # Limit probe data size for speed
+            '-analyzeduration', '5M',  # Limit analysis duration for speed
             '-select_streams', 'v:0',
             '-show_entries', 'stream=width,height,duration,r_frame_rate',
             '-of', 'json',
@@ -168,9 +176,31 @@ class PoseDetectionService:
         ]
         
         try:
-            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, timeout=30, check=True)
+            # Increased timeout to 120s for large videos or slow connections
+            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, timeout=120, check=True)
+        except subprocess.TimeoutExpired:
+            logger.error(f"FFprobe timeout after 120s for URL: {s3_url[:100]}...")
+            raise Exception("Video probing timed out. Video may be too large or network connection is slow.")
         except subprocess.CalledProcessError as e:
-            raise Exception(f"FFprobe failed: {e.stderr}")
+            stderr = e.stderr or ""
+            
+            # Check for common errors
+            if "moov atom not found" in stderr:
+                raise Exception(
+                    "Video file is incomplete or corrupted. The upload may not have finished. "
+                    "Please try uploading again and ensure the upload completes fully before moving to the next step."
+                )
+            elif "Connection" in stderr and "timed out" in stderr:
+                raise Exception(
+                    "Network timeout while connecting to S3. This could be a temporary network issue. "
+                    "Try again in a few moments."
+                )
+            elif "Invalid data found" in stderr:
+                raise Exception(
+                    "Video file format is invalid or corrupted. Please ensure you're uploading a valid video file."
+                )
+            else:
+                raise Exception(f"FFprobe failed: {stderr}")
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"FFprobe executable not found. Please install FFmpeg and ensure it's in your PATH. "
@@ -179,14 +209,19 @@ class PoseDetectionService:
         probe_data = json.loads(result.stdout)
         stream_info = probe_data.get('streams', [{}])[0]
         
-        return {
+        video_info = {
             'width': int(stream_info.get('width', 640)),
             'height': int(stream_info.get('height', 480)),
             'duration': float(stream_info.get('duration', 0))
         }
+        
+        logger.info(f"[POSE] ✓ Metadata fetched: {video_info['width']}x{video_info['height']}, {video_info['duration']:.1f}s")
+        return video_info
     
     def _extract_frames(self, s3_url: str, video_info: Dict, fps: float, max_frames: int, max_duration: float = None) -> List[Dict]:
         """Extract frames from video using FFmpeg streaming with optimization."""
+        logger.info("[POSE] 🎬 Stage 2/3: Extracting frames from video...")
+        
         if not shutil.which(self.ffmpeg_path):
             raise FileNotFoundError(
                 f"FFmpeg executable not found at '{self.ffmpeg_path}'. "
@@ -205,15 +240,23 @@ class PoseDetectionService:
         
         logger.info(f"[POSE] Processing {process_duration:.1f}s of video at {fps} fps")
         
-        # Simple frame extraction without complex scaling
+        # Robust frame extraction with mobile video support
+        # -protocol_whitelist: Allow file,http,https,tcp,tls protocols for S3
+        # -reconnect: Auto-reconnect on network issues
+        # -an: Disable audio (not needed for pose detection)
         ffmpeg_cmd = [
             self.ffmpeg_path,
+            '-protocol_whitelist', 'file,http,https,tcp,tls',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
             '-i', s3_url,
             '-t', str(process_duration),  # Process full duration (or capped)
             '-vf', f'fps={fps}',  # Extract at specified FPS
             '-f', 'image2pipe',
             '-pix_fmt', 'rgb24',
             '-vcodec', 'rawvideo',
+            '-an',  # Disable audio
             '-loglevel', 'warning',  # Show warnings to help debug
             '-'
         ]
@@ -235,7 +278,7 @@ class PoseDetectionService:
         frame_size = width * height * 3
         frame_count = 0
         
-        logger.info(f"[POSE] Extracting frames: {width}x{height}, frame_size={frame_size}")
+        logger.info(f"[POSE] Extracting up to {max_frames} frames at {fps} fps...")
         
         try:
             while frame_count < max_frames:
@@ -250,14 +293,30 @@ class PoseDetectionService:
                     'frame_number': frame_count
                 })
                 frame_count += 1
+                
+                # Log extraction progress every 10%
+                if frame_count % max(1, max_frames // 10) == 0:
+                    progress = (frame_count / max_frames) * 100
+                    logger.info(f"[POSE] Extracting... {frame_count}/{max_frames} frames ({progress:.0f}%)")
         finally:
+            # Capture any error output from ffmpeg
+            stderr_output = None
+            if process.stderr:
+                stderr_output = process.stderr.read().decode('utf-8', errors='ignore')
+            
             process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+            
+            # Log ffmpeg errors if no frames extracted
+            if not frames_data and stderr_output:
+                logger.error(f"[POSE] FFmpeg stderr: {stderr_output}")
+                raise Exception(f"FFmpeg failed to extract frames. Error: {stderr_output[:500]}")
         
+        logger.info(f"[POSE] Successfully extracted {len(frames_data)} frames")
         return frames_data
     
     def analyze_video_from_s3(
@@ -304,15 +363,23 @@ class PoseDetectionService:
         if not frames_data:
             raise Exception("No frames could be extracted from the video")
         
-        logger.info(f"Extracted {len(frames_data)} frames, running pose detection...")
+        logger.info(f"[POSE] ✓ Extracted {len(frames_data)} frames successfully")
+        logger.info("[POSE] 🤸 Stage 3/3: Running pose detection on frames...")
         
         # Process frames with early success exit
         pose_frames = []
         all_confidences = []
         consecutive_failures = 0
         max_consecutive_failures = 5  # Stop if 5 consecutive frames fail
+        total_frames = len(frames_data)
+        log_interval = max(1, total_frames // 10)  # Log progress every 10%
         
-        for frame_data in frames_data:
+        for i, frame_data in enumerate(frames_data):
+            # Log progress every 10%
+            if i % log_interval == 0:
+                progress = ((i + 1) / total_frames) * 100
+                detected = len(pose_frames)
+                logger.info(f"[POSE] Analyzing... {i+1}/{total_frames} frames ({progress:.0f}%) | {detected} poses detected")
             try:
                 pose_result = self._detect_pose_single_frame(frame_data['frame'])
                 
@@ -347,6 +414,10 @@ class PoseDetectionService:
             raise Exception("Failed to detect pose in any frame")
         
         avg_confidence = sum(all_confidences) / len(all_confidences)
+        detection_rate = len(pose_frames) / len(frames_data)
+        
+        logger.info(f"[POSE] ✓ Pose detection complete!")
+        logger.info(f"[POSE] 📈 Results: {len(pose_frames)}/{len(frames_data)} frames ({detection_rate:.0%}) | Avg confidence: {avg_confidence:.1%}")
         
         # Build pose data structure
         pose_data = {

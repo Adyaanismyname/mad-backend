@@ -1804,14 +1804,14 @@ Request a presigned S3 URL for uploading a media file. This validates your file 
 
 **Response Field Descriptions:**
 
-| Field          | Description                                                   |
-| -------------- | ------------------------------------------------------------- |
-| `upload_url`   | **USE THIS** to upload your file via PUT request (see Step 2) |
-| `media_url`    | Final URL where file will be accessible (save for later)      |
-| `s3_key`       | S3 object key (internal identifier)                           |
-| `content_type` | MIME type to use in upload headers                            |
-| `expires_at`   | ISO timestamp when upload_url expires (1 hour from now)       |
-| `upload_id`    | **SAVE THIS** - needed for confirmation in Step 3             |
+| Field           | Description                                                   |
+| --------------- | ------------------------------------------------------------- |
+| `upload_url`    | **USE THIS** to upload your file via PUT request (see Step 2) |
+| `media_url`     | Final URL where file will be accessible (save for later)      |
+| `s3_key`        | S3 object key (internal identifier)                           |
+| `content_type`  | MIME type to use in upload headers                            |
+| `expires_at`    | ISO timestamp when upload_url expires (1 hour from now)       |
+| `upload_id`     | **SAVE THIS** - needed for confirmation in Step 3             |
 | `upload_limits` | Current video upload usage and remaining capacity (see below) |
 
 **Status Codes:**
@@ -1902,7 +1902,7 @@ const uploadToS3 = async (fileUri, presignedData) => {
         headers: {
           "Content-Type": presignedData.content_type,
         },
-      }
+      },
     );
 
     if (response.status !== 200) {
@@ -2105,9 +2105,9 @@ Check the current video upload limits and usage for the authenticated client. Us
 
 **Query Parameters:**
 
-| Field         | Type | Required    | Description                                 |
-| ------------- | ---- | ----------- | ------------------------------------------- |
-| `exercise_id` | UUID | ❌ Optional | Exercise to check per-exercise limits for   |
+| Field         | Type | Required    | Description                               |
+| ------------- | ---- | ----------- | ----------------------------------------- |
+| `exercise_id` | UUID | ❌ Optional | Exercise to check per-exercise limits for |
 
 **Example:** `/feedback/media/upload-limits?exercise_id=123e4567-e89b-12d3-a456-426614174000`
 
@@ -2150,15 +2150,15 @@ Check the current video upload limits and usage for the authenticated client. Us
 
 **Response Field Descriptions:**
 
-| Field                    | Description                                      |
-| ------------------------ | ------------------------------------------------ |
-| `overall.used`           | Total confirmed + in-progress video uploads      |
-| `overall.limit`          | Maximum allowed videos overall (currently 10)    |
-| `overall.remaining`      | How many more videos can be uploaded              |
-| `exercise.used`          | Videos uploaded for this specific exercise        |
-| `exercise.limit`         | Max videos per exercise (currently 2)            |
-| `exercise.remaining`     | How many more videos for this exercise           |
-| `exercise.exercise_id`   | The exercise these counts refer to               |
+| Field                  | Description                                   |
+| ---------------------- | --------------------------------------------- |
+| `overall.used`         | Total confirmed + in-progress video uploads   |
+| `overall.limit`        | Maximum allowed videos overall (currently 10) |
+| `overall.remaining`    | How many more videos can be uploaded          |
+| `exercise.used`        | Videos uploaded for this specific exercise    |
+| `exercise.limit`       | Max videos per exercise (currently 2)         |
+| `exercise.remaining`   | How many more videos for this exercise        |
+| `exercise.exercise_id` | The exercise these counts refer to            |
 
 **Status Codes:**
 
@@ -2180,10 +2180,10 @@ The backend enforces per-client video upload limits to manage storage and ensure
 
 ### Limits
 
-| Scope        | Limit | Description                                      |
-| ------------ | ----- | ------------------------------------------------ |
-| **Overall**  | 10    | Maximum total videos a client can upload          |
-| **Exercise** | 2     | Maximum videos per exercise per client            |
+| Scope        | Limit | Description                              |
+| ------------ | ----- | ---------------------------------------- |
+| **Overall**  | 10    | Maximum total videos a client can upload |
+| **Exercise** | 2     | Maximum videos per exercise per client   |
 
 ### How Limits Are Enforced
 
@@ -2233,13 +2233,13 @@ When a limit is exceeded, the API returns `409 Conflict` with a structured error
 
 **Error Field Descriptions:**
 
-| Field           | Description                                              |
-| --------------- | -------------------------------------------------------- |
-| `message`       | Human-readable error message                             |
-| `limit`         | The maximum allowed count                                |
-| `current_count` | How many the client currently has                        |
-| `scope`         | `"overall"` or `"exercise"` — which limit was hit       |
-| `exercise_id`   | (exercise scope only) The exercise that hit the limit    |
+| Field           | Description                                           |
+| --------------- | ----------------------------------------------------- |
+| `message`       | Human-readable error message                          |
+| `limit`         | The maximum allowed count                             |
+| `current_count` | How many the client currently has                     |
+| `scope`         | `"overall"` or `"exercise"` — which limit was hit     |
+| `exercise_id`   | (exercise scope only) The exercise that hit the limit |
 
 ### Frontend Handling Recommendations
 
@@ -2251,9 +2251,13 @@ try {
   if (error.status === 409) {
     const detail = error.response.detail;
     if (detail.scope === "overall") {
-      showError(`You've reached the maximum of ${detail.limit} videos. Delete some videos to upload more.`);
+      showError(
+        `You've reached the maximum of ${detail.limit} videos. Delete some videos to upload more.`,
+      );
     } else if (detail.scope === "exercise") {
-      showError(`This exercise already has ${detail.limit} videos. Delete an existing video first.`);
+      showError(
+        `This exercise already has ${detail.limit} videos. Delete an existing video first.`,
+      );
     }
   }
 }
@@ -2287,10 +2291,14 @@ class MediaUploader {
       if (file.type.startsWith("video/")) {
         const limits = await this.checkUploadLimits(exerciseId);
         if (limits.overall.remaining <= 0) {
-          throw new Error(`Upload limit reached: maximum ${limits.overall.limit} videos allowed (you have ${limits.overall.used})`);
+          throw new Error(
+            `Upload limit reached: maximum ${limits.overall.limit} videos allowed (you have ${limits.overall.used})`,
+          );
         }
         if (limits.exercise && limits.exercise.remaining <= 0) {
-          throw new Error(`Exercise limit reached: maximum ${limits.exercise.limit} videos per exercise (this exercise has ${limits.exercise.used})`);
+          throw new Error(
+            `Exercise limit reached: maximum ${limits.exercise.limit} videos per exercise (this exercise has ${limits.exercise.used})`,
+          );
         }
       }
 
@@ -2299,7 +2307,7 @@ class MediaUploader {
       const presignedData = await this.initiateUpload(
         file,
         exerciseId,
-        assignedWorkoutId
+        assignedWorkoutId,
       );
 
       // Step 2: Upload to S3
@@ -2311,7 +2319,7 @@ class MediaUploader {
       const mediaRecord = await this.confirmUpload(
         presignedData.upload_id,
         exerciseId,
-        assignedWorkoutId
+        assignedWorkoutId,
       );
 
       console.log("Upload complete!", mediaRecord);
@@ -2364,7 +2372,7 @@ class MediaUploader {
           exercise_id: exerciseId,
           assigned_workout_id: assignedWorkoutId,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -2373,9 +2381,13 @@ class MediaUploader {
       if (response.status === 409) {
         const detail = error.detail;
         if (detail.scope === "overall") {
-          throw new Error(`Upload limit reached: maximum ${detail.limit} videos allowed (you have ${detail.current_count})`);
+          throw new Error(
+            `Upload limit reached: maximum ${detail.limit} videos allowed (you have ${detail.current_count})`,
+          );
         } else {
-          throw new Error(`Exercise limit reached: maximum ${detail.limit} videos per exercise (this exercise has ${detail.current_count})`);
+          throw new Error(
+            `Exercise limit reached: maximum ${detail.limit} videos per exercise (this exercise has ${detail.current_count})`,
+          );
         }
       }
       throw new Error(error.detail || "Failed to initiate upload");
@@ -2442,7 +2454,7 @@ class MediaUploader {
           exercise_id: exerciseId,
           assigned_workout_id: assignedWorkoutId,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -2504,7 +2516,7 @@ fileInput.addEventListener("change", async (e) => {
     const media = await uploader.uploadMedia(
       file,
       exerciseId,
-      assignedWorkoutId
+      assignedWorkoutId,
     );
     console.log("Media uploaded:", media);
   } catch (error) {
@@ -2546,7 +2558,7 @@ function MediaUploadComponent({ exerciseId, assignedWorkoutId, authToken }) {
       const media = await uploader.uploadMedia(
         file,
         exerciseId,
-        assignedWorkoutId
+        assignedWorkoutId,
       );
 
       setUploadedMedia(media);
@@ -2596,7 +2608,7 @@ async function uploadWithRetry(
   file,
   exerciseId,
   assignedWorkoutId,
-  maxRetries = 3
+  maxRetries = 3,
 ) {
   const uploader = new MediaUploader(API_BASE_URL, authToken);
 
@@ -2634,15 +2646,15 @@ async function uploadWithRetry(
 
 ### Common Frontend Issues & Solutions
 
-| Issue                          | Cause                                   | Solution                                                         |
-| ------------------------------ | --------------------------------------- | ---------------------------------------------------------------- |
-| **403 Forbidden on S3 upload** | Wrong Content-Type or expired URL       | Use exact `content_type` from Step 1, request new URL if expired |
-| **404 on confirm**             | File didn't upload to S3                | Check Step 2 response was 200, verify network connection         |
-| **400 Invalid file type**      | Wrong file extension or too large       | Validate client-side before Step 1                               |
-| **409 Conflict on initiate**   | Video upload limit reached              | Check `detail.scope` for `"overall"` or `"exercise"`, show appropriate message. Use `/upload-limits` endpoint to check before uploading |
-| **409 Conflict on confirm**    | Another upload confirmed in the meantime | Rare race condition — inform user and check limits again          |
-| **Upload hangs**               | Network issue or CORS problem           | Implement timeout, check S3 bucket CORS config                   |
-| **Progress stuck at 0%**       | Using fetch() instead of XMLHttpRequest | Use XMLHttpRequest or libraries with progress support            |
+| Issue                          | Cause                                    | Solution                                                                                                                                |
+| ------------------------------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **403 Forbidden on S3 upload** | Wrong Content-Type or expired URL        | Use exact `content_type` from Step 1, request new URL if expired                                                                        |
+| **404 on confirm**             | File didn't upload to S3                 | Check Step 2 response was 200, verify network connection                                                                                |
+| **400 Invalid file type**      | Wrong file extension or too large        | Validate client-side before Step 1                                                                                                      |
+| **409 Conflict on initiate**   | Video upload limit reached               | Check `detail.scope` for `"overall"` or `"exercise"`, show appropriate message. Use `/upload-limits` endpoint to check before uploading |
+| **409 Conflict on confirm**    | Another upload confirmed in the meantime | Rare race condition — inform user and check limits again                                                                                |
+| **Upload hangs**               | Network issue or CORS problem            | Implement timeout, check S3 bucket CORS config                                                                                          |
+| **Progress stuck at 0%**       | Using fetch() instead of XMLHttpRequest  | Use XMLHttpRequest or libraries with progress support                                                                                   |
 
 ---
 
@@ -2715,7 +2727,8 @@ Get all media uploads for the authenticated client.
   "message": "Media uploads retrieved successfully"
 }
 ```
-```
+
+````
 
 **Status Codes:**
 
@@ -2762,7 +2775,7 @@ Get media uploads from a specific client (Coach only).
   ],
   "message": "Client media retrieved successfully"
 }
-```
+````
 
 **Status Codes:**
 
@@ -3167,6 +3180,7 @@ Generate a temporary download URL for a media file.
 ### Overview
 
 Pose detection is **automatic and runs in the background** after video upload confirmation. This provides:
+
 - **Instant upload responses** (<1 second)
 - **Non-blocking processing** (8-12 seconds in background)
 - **Status tracking** via `pose_analysis_status` field
@@ -3180,12 +3194,12 @@ Pose detection is **automatic and runs in the background** after video upload co
 
 ### Pose Analysis Status Values
 
-| Status | Description |
-|--------|-------------|
-| `pending` | Processing not yet started |
-| `processing` | Currently analyzing video |
-| `completed` | Pose data available |
-| `failed` | Processing encountered an error |
+| Status       | Description                     |
+| ------------ | ------------------------------- |
+| `pending`    | Processing not yet started      |
+| `processing` | Currently analyzing video       |
+| `completed`  | Pose data available             |
+| `failed`     | Processing encountered an error |
 
 ### Payload Optimization
 
@@ -3193,13 +3207,14 @@ Pose detection is **automatic and runs in the background** after video upload co
 
 By default, `pose_data` returns only a summary without frame-by-frame keypoints. Use query parameters to control payload size:
 
-| Endpoint | Parameter | Effect |
-|----------|-----------|--------|
-| `GET /feedback/media/my-uploads` | `include_pose_frames=true` | Returns full frame data |
-| `GET /feedback/media/client/{id}` | `include_pose_frames=true` | Returns full frame data |
-| `GET /feedback/media/{id}/pose-data` | `include_frames=true` | Returns full frame data |
+| Endpoint                             | Parameter                  | Effect                  |
+| ------------------------------------ | -------------------------- | ----------------------- |
+| `GET /feedback/media/my-uploads`     | `include_pose_frames=true` | Returns full frame data |
+| `GET /feedback/media/client/{id}`    | `include_pose_frames=true` | Returns full frame data |
+| `GET /feedback/media/{id}/pose-data` | `include_frames=true`      | Returns full frame data |
 
 **Lightweight Summary Response (default):**
+
 ```json
 {
   "pose_data": {
@@ -3210,7 +3225,7 @@ By default, `pose_data` returns only a summary without frame-by-frame keypoints.
       "total_frames": 40,
       "detection_rate": 0.95
     },
-    "video_info": {"width": 1920, "height": 1080, "duration": 20.5},
+    "video_info": { "width": 1920, "height": 1080, "duration": 20.5 },
     "frame_count": 40,
     "note": "Full frames via include_pose_frames=true"
   }
@@ -3218,6 +3233,7 @@ By default, `pose_data` returns only a summary without frame-by-frame keypoints.
 ```
 
 **Full Frame Data Response (with `include_pose_frames=true`):**
+
 ```json
 {
   "pose_data": {

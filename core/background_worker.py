@@ -25,10 +25,15 @@ class PoseDetectionWorker:
         self.task = None
     
     async def process_pending_videos(self):
-        """Process videos with pending pose analysis status."""
+        """Process videos with pending pose analysis status.
+        
+        IMPORTANT: DB session is only held during queries/updates, NOT during
+        CPU-heavy pose detection. This prevents blocking API requests.
+        """
         try:
+            # Step 1: Fetch pending videos and mark as processing (quick DB op)
+            pending_jobs = []
             async with SessionLocal() as db:
-                # Find pending videos
                 result = await db.execute(
                     select(MediaUpload)
                     .filter(
@@ -41,54 +46,89 @@ class PoseDetectionWorker:
                 pending_videos = result.scalars().all()
                 
                 if not pending_videos:
+                    # Log at debug level to avoid spam, but helps with troubleshooting
+                    logger.debug("[WORKER] No pending videos found")
                     return
                 
-                logger.info(f"[WORKER] Processing {len(pending_videos)} pending videos")
-                
-                s3_service = get_s3_service()
-                pose_service = get_pose_detection_service()
+                logger.info(f"[WORKER] Found {len(pending_videos)} pending videos")
                 
                 for media in pending_videos:
-                    try:
-                        # Update status to processing
-                        media.pose_analysis_status = "processing"
-                        await db.commit()
-                        
-                        # Get presigned URL
-                        presigned_url = s3_service.generate_presigned_download_url(
-                            s3_key=media.s3_key,
-                            expires_in=3600
+                    media.pose_analysis_status = "processing"
+                    pending_jobs.append({"id": media.id, "s3_key": media.s3_key})
+                
+                await db.commit()
+                # DB session is now released!
+            
+            # Step 2: Process each video (CPU-heavy, NO DB session held)
+            s3_service = get_s3_service()
+            pose_service = get_pose_detection_service()
+            
+            for job in pending_jobs:
+                media_id = job["id"]
+                s3_key = job["s3_key"]
+                
+                try:
+                    logger.info(f"[WORKER] ▶ Starting pose detection for video {media_id}")
+                    
+                    # Small delay to ensure S3 finalized the file (multipart uploads)
+                    await asyncio.sleep(2)
+                    
+                    presigned_url = s3_service.generate_presigned_download_url(
+                        s3_key=s3_key,
+                        expires_in=3600
+                    )
+                    
+                    # Run in thread pool — does NOT block the event loop
+                    pose_data = await asyncio.to_thread(
+                        pose_service.analyze_video_from_s3,
+                        s3_url=presigned_url,
+                        fps=10.0,
+                        max_frames=1200,
+                        max_duration=120.0,
+                        min_confidence=0.25
+                    )
+                    
+                    # Step 3: Save results (quick DB op)
+                    async with SessionLocal() as db:
+                        result = await db.execute(
+                            select(MediaUpload).filter(MediaUpload.id == media_id)
                         )
-                        
-                        # Run pose detection - 10fps for smooth playback, up to 2 min videos
-                        pose_data = pose_service.analyze_video_from_s3(
-                            s3_url=presigned_url,
-                            fps=10.0,
-                            max_frames=1200,
-                            max_duration=120.0,
-                            min_confidence=0.25
+                        media = result.scalar_one_or_none()
+                        if media:
+                            media.pose_data = pose_data
+                            media.pose_analysis_status = "completed"
+                            await db.commit()
+                    
+                    frames = pose_data.get("summary", {}).get("total_frames", "?")
+                    confidence = pose_data.get("summary", {}).get("average_confidence", "?")
+                    logger.info(f"[WORKER] ✓ Completed video {media_id} — {frames} frames, confidence: {confidence}")
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"[WORKER] ✗ Failed video {media_id}: {error_msg}")
+                    
+                    # Provide helpful context for common errors
+                    if "incomplete or corrupted" in error_msg.lower():
+                        logger.error(f"[WORKER] 💡 TIP: Video {media_id} upload may not have completed. Client should wait before confirming.")
+                    elif "timeout" in error_msg.lower():
+                        logger.error(f"[WORKER] 💡 TIP: Network timeout for video {media_id}. Will retry on next worker cycle.")
+                    
+                    # Save failure (quick DB op)
+                    async with SessionLocal() as db:
+                        result = await db.execute(
+                            select(MediaUpload).filter(MediaUpload.id == media_id)
                         )
-                        
-                        # Save results
-                        media.pose_data = pose_data
-                        media.pose_analysis_status = "completed"
-                        await db.commit()
-                        
-                        logger.info(f"[WORKER] ✓ Completed pose detection for video {media.id}")
-                        
-                    except Exception as e:
-                        logger.error(f"[WORKER] ✗ Failed processing video {media.id}: {e}")
-                        
-                        # Update status to failed
-                        media.pose_analysis_status = "failed"
-                        media.pose_data = {
-                            "error": str(e),
-                            "processed_at": datetime.now(timezone.utc).isoformat()
-                        }
-                        await db.commit()
+                        media = result.scalar_one_or_none()
+                        if media:
+                            media.pose_analysis_status = "failed"
+                            media.pose_data = {
+                                "error": error_msg,
+                                "processed_at": datetime.now(timezone.utc).isoformat()
+                            }
+                            await db.commit()
                         
         except Exception as e:
-            logger.error(f"[WORKER] Error in process_pending_videos: {e}")
+            logger.error(f"[WORKER] Error in process_pending_videos: {e}", exc_info=True)
     
     async def run(self):
         """Main worker loop."""
@@ -108,8 +148,14 @@ class PoseDetectionWorker:
     def start(self):
         """Start the worker in the background."""
         if not self.task:
-            self.task = asyncio.create_task(self.run())
-            logger.info("[WORKER] Background worker task created")
+            try:
+                self.task = asyncio.create_task(self.run())
+                logger.info(f"[WORKER] ✓ Background worker task created (polling every {self.interval}s)")
+                logger.info(f"[WORKER] ✓ Worker will process up to {self.batch_size} videos per batch")
+            except RuntimeError as e:
+                logger.error(f"[WORKER] ✗ Failed to create worker task: {e}")
+                logger.error(f"[WORKER] ✗ This usually means no event loop is running")
+                raise
     
     async def stop(self):
         """Stop the worker gracefully."""

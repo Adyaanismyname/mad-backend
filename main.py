@@ -5,19 +5,39 @@ from fastapi.responses import JSONResponse
 from api.router import router as api_router
 from contextlib import asynccontextmanager
 from core.background_worker import get_worker
+import logging
+
+# Configure logging for the entire application
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True  # Override any existing config
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     # Startup: Start the background worker
+    logger.info("========================================")
+    logger.info("🚀 Starting FastAPI application...")
+    logger.info("========================================")
+    
     worker = get_worker()
     worker.start()
+    
+    logger.info("✓ Background worker initialized")
+    logger.info("========================================")
     
     yield
     
     # Shutdown: Stop the background worker
+    logger.info("🛑 Shutting down background worker...")
     await worker.stop()
+    logger.info("✓ Background worker stopped")
 
 
 app = FastAPI(
