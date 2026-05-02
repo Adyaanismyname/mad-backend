@@ -23,8 +23,6 @@ from models.exercise import Exercise
 from models.workout_exercise import WorkoutExercise
 from models.assigned_workout import AssignedWorkout, AssignmentStatus
 from models.coach_client_relationship import CoachClientRelationship, RelationshipStatus
-from models.media_upload import MediaUpload
-from models.feedback import Feedback
 from core.auth import create_access_token
 from core.config import settings
 
@@ -359,44 +357,6 @@ async def assigned_workout(db_session, sample_workout, coach_user, client_user, 
     return assignment
 
 
-# ============= Media Fixtures =============
-
-@pytest_asyncio.fixture()
-async def sample_media(db_session, client_user, sample_exercise, assigned_workout) -> MediaUpload:
-    """Create a sample media upload."""
-    media = MediaUpload(
-        id=uuid.uuid4(),
-        client_user_id=client_user.id,
-        assigned_workout_id=assigned_workout.id,
-        exercise_id=sample_exercise.id,
-        media_url="https://storage.example.com/video1.mp4",
-        media_type="video",
-        status="ready"
-    )
-    db_session.add(media)
-    await db_session.flush()
-    await db_session.refresh(media)
-    return media
-
-
-# ============= Feedback Fixtures =============
-
-@pytest_asyncio.fixture()
-async def sample_feedback(db_session, sample_media, coach_user) -> Feedback:
-    """Create sample feedback on media."""
-    feedback = Feedback(
-        id=uuid.uuid4(),
-        media_id=sample_media.id,
-        coach_user_id=coach_user.id,
-        content="Great form! Keep it up!",
-        annotation_data={"timestamp": 15.5, "note": "Watch elbow position"}
-    )
-    db_session.add(feedback)
-    await db_session.flush()
-    await db_session.refresh(feedback)
-    return feedback
-
-
 # ============= Helper Functions =============
 
 def create_workout_data(exercise_id: str | None = None) -> dict:
@@ -433,43 +393,4 @@ def create_assignment_data(workout_id: str, client_id: str) -> dict:
         "assigned_date": date.today().isoformat(),
         "due_date": (date.today() + timedelta(days=7)).isoformat(),
         "coach_notes": "Test assignment notes"
-    }
-
-
-def create_media_data(exercise_id: str, assigned_workout_id: str | None = None) -> dict:
-    """Helper function to create media upload request data (legacy/direct upload)."""
-    return {
-        "assigned_workout_id": assigned_workout_id,
-        "exercise_id": exercise_id,
-        "media_url": "https://storage.example.com/test-video.mp4",
-        "media_type": "video"
-    }
-
-
-def create_media_initiate_data(exercise_id: str, assigned_workout_id: str | None = None) -> dict:
-    """Helper function to create media upload initiate request data (S3 presigned URL)."""
-    return {
-        "assigned_workout_id": assigned_workout_id,
-        "exercise_id": exercise_id,
-        "filename": "test-workout-video.mp4",
-        "media_type": "video",
-        "file_size_mb": 25.5
-    }
-
-
-def create_media_confirm_data(upload_id: str, exercise_id: str, assigned_workout_id: str | None = None) -> dict:
-    """Helper function to create media upload confirm request data."""
-    return {
-        "upload_id": upload_id,
-        "exercise_id": exercise_id,
-        "assigned_workout_id": assigned_workout_id
-    }
-
-
-def create_feedback_data(content: str = "Test feedback") -> dict:
-    """Helper function to create feedback request data."""
-    return {
-        "content": content,
-        "annotation_data": {"timestamp": 10.5},
-        "parent_feedback_id": None
     }

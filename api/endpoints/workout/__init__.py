@@ -7,7 +7,7 @@ from .delete import router as delete_router
 from .update import router as update_router
 from .exercise_library import router as exercise_library_router
 
-# Create main feedback router
+# Create main workout router
 router = APIRouter()
 
 # Include all sub-routers

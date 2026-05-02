@@ -29,7 +29,6 @@ class Exercise(Base):
     
     # Relationships
     workout_exercises = relationship("WorkoutExercise", back_populates="exercise", cascade="all, delete-orphan")
-    media_uploads = relationship("MediaUpload", back_populates="exercise", cascade="all, delete-orphan")
     exercise_progress = relationship("ExerciseProgress", back_populates="exercise", cascade="all, delete-orphan")
     
     def __repr__(self):

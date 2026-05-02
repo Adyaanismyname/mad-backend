@@ -9,13 +9,10 @@ from .workout import Workout
 from .workout_exercise import WorkoutExercise
 from .assigned_workout import AssignedWorkout, AssignmentStatus
 from .exercise_progress import ExerciseProgress
-from .media_upload import MediaUpload
-from .feedback import Feedback
 from .progress_tracking import ProgressTracking
 from .password_reset_token import PasswordResetToken
 from .email_verification_token import EmailVerificationToken
 from .refresh_token import RefreshToken
-from .pose_analysis import PoseAnalysis
 
 __all__ = [
     "User", "UserRole",
@@ -27,11 +24,8 @@ __all__ = [
     "WorkoutExercise",
     "AssignedWorkout", "AssignmentStatus",
     "ExerciseProgress",
-    "MediaUpload",
-    "Feedback",
     "ProgressTracking",
     "PasswordResetToken",
     "EmailVerificationToken",
-    "RefreshToken",
-    "PoseAnalysis"
+    "RefreshToken"
 ]

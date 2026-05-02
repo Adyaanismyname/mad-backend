@@ -13,9 +13,8 @@ from db.base import Base
 from models import (  # noqa: F401
     user, coach_profile, client_profile, coach_client_relationship,
     exercise, workout, workout_exercise, assigned_workout,
-    exercise_progress, media_upload, feedback, progress_tracking,
-    password_reset_token, email_verification_token, refresh_token,
-    pose_analysis
+    exercise_progress, progress_tracking,
+    password_reset_token, email_verification_token, refresh_token
 )
 
 # this is the Alembic Config object, which provides

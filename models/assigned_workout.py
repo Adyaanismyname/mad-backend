@@ -42,7 +42,6 @@ class AssignedWorkout(Base):
     coach_client_relationship = relationship("CoachClientRelationship", back_populates="assigned_workouts")
     coach = relationship("User", foreign_keys=[coach_user_id], back_populates="assigned_workouts_as_coach")
     client = relationship("User", foreign_keys=[client_user_id], back_populates="assigned_workouts_as_client")
-    media_uploads = relationship("MediaUpload", back_populates="assigned_workout", cascade="all, delete-orphan")
     exercise_progress = relationship("ExerciseProgress", back_populates="assigned_workout", cascade="all, delete-orphan")
     
     def __repr__(self):

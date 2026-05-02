@@ -84,10 +84,6 @@ class User(Base):
         cascade="all, delete-orphan"
     )
     
-    # --- Media & Feedback Relationships ---
-    media_uploads = relationship("MediaUpload", back_populates="client_user", cascade="all, delete-orphan")
-    feedback_given = relationship("Feedback", back_populates="coach", cascade="all, delete-orphan")
-    
     # --- Progress Tracking Relationships ---
     progress_tracking = relationship("ProgressTracking", back_populates="client_user", cascade="all, delete-orphan")
     exercise_progress = relationship("ExerciseProgress", back_populates="client", cascade="all, delete-orphan")
