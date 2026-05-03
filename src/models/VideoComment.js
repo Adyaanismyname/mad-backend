@@ -1,18 +1,13 @@
 const mongoose = require('mongoose');
 
-const videoFeedbackSchema = new mongoose.Schema(
+const videoCommentSchema = new mongoose.Schema(
   {
     video: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'ExerciseVideo',
+      ref: 'Video',
       required: true,
     },
     trainer: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    client: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
@@ -21,7 +16,7 @@ const videoFeedbackSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      minlength: 1,
+      maxlength: 2000,
     },
   },
   {
@@ -29,6 +24,6 @@ const videoFeedbackSchema = new mongoose.Schema(
   }
 );
 
-videoFeedbackSchema.index({ video: 1, createdAt: 1 });
+videoCommentSchema.index({ video: 1, createdAt: 1 });
 
-module.exports = mongoose.model('VideoFeedback', videoFeedbackSchema);
+module.exports = mongoose.model('VideoComment', videoCommentSchema);

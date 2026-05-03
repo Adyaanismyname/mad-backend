@@ -566,7 +566,218 @@ Error responses:
 - `401` token missing/invalid
 - `403` forbidden role
 
-## 6. Common Error Format
+## 6. Video Upload and Feedback Endpoints
+
+## POST /api/videos/upload
+Upload a workout video by client.
+
+Auth required: Yes
+Role required: `client`
+Content-Type: `multipart/form-data`
+
+Form-data fields:
+- `video` (required, file)
+- `title` (optional, string, 2-120 chars)
+- `description` (optional, string, max 1000 chars)
+- `workoutId` (optional, Mongo ID, must belong to current client)
+- `workoutAssignmentId` (optional, Mongo ID, must belong to current client)
+
+Success response (201):
+```json
+{
+  "message": "Video uploaded successfully",
+  "video": {
+    "_id": "6635ea2f1ad8c4f2b6e2a181",
+    "client": "6635d60f1ad8c4f2b6e2a104",
+    "title": "Leg Day Form Check",
+    "description": "Please review squat depth",
+    "fileName": "1746278353123-squat.mp4",
+    "originalName": "squat.mp4",
+    "filePath": "uploads/videos/1746278353123-squat.mp4",
+    "mimeType": "video/mp4",
+    "sizeBytes": 7340032,
+    "status": "uploaded",
+    "uploadedAt": "2026-05-03T12:20:10.000Z",
+    "createdAt": "2026-05-03T12:20:10.000Z",
+    "updatedAt": "2026-05-03T12:20:10.000Z"
+  },
+  "playbackUrl": "/uploads/videos/1746278353123-squat.mp4"
+}
+```
+
+Error responses:
+- `400` missing file, invalid field values, unsupported file type, file too large
+- `401` token missing/invalid
+- `403` forbidden role
+- `404` linked workout or assignment not found
+
+## GET /api/videos/mine
+Get all videos uploaded by current client.
+
+Auth required: Yes
+Role required: `client`
+
+Success response (200):
+```json
+{
+  "videos": [
+    {
+      "_id": "6635ea2f1ad8c4f2b6e2a181",
+      "client": "6635d60f1ad8c4f2b6e2a104",
+      "title": "Leg Day Form Check",
+      "description": "Please review squat depth",
+      "status": "reviewed",
+      "filePath": "uploads/videos/1746278353123-squat.mp4",
+      "mimeType": "video/mp4",
+      "sizeBytes": 7340032,
+      "createdAt": "2026-05-03T12:20:10.000Z"
+    }
+  ]
+}
+```
+
+## GET /api/videos/review
+Get all videos from clients assigned to current trainer.
+
+Auth required: Yes
+Role required: `trainer`
+
+Query params:
+- `clientId` (optional, Mongo ID). If provided, trainer must be assigned to that client.
+
+Success response (200):
+```json
+{
+  "videos": [
+    {
+      "_id": "6635ea2f1ad8c4f2b6e2a181",
+      "client": {
+        "_id": "6635d60f1ad8c4f2b6e2a104",
+        "name": "Client One",
+        "email": "client1@example.com"
+      },
+      "title": "Leg Day Form Check",
+      "status": "uploaded",
+      "filePath": "uploads/videos/1746278353123-squat.mp4",
+      "createdAt": "2026-05-03T12:20:10.000Z"
+    }
+  ]
+}
+```
+
+Error responses:
+- `401` token missing/invalid
+- `403` forbidden role or trainer not assigned to target client
+
+## GET /api/videos/:videoId
+Get a single video detail.
+
+Auth required: Yes
+Access rules:
+- Client can access only own video
+- Trainer can access only videos of assigned clients
+
+Success response (200):
+```json
+{
+  "video": {
+    "_id": "6635ea2f1ad8c4f2b6e2a181",
+    "client": {
+      "_id": "6635d60f1ad8c4f2b6e2a104",
+      "name": "Client One",
+      "email": "client1@example.com"
+    },
+    "title": "Leg Day Form Check",
+    "description": "Please review squat depth",
+    "filePath": "uploads/videos/1746278353123-squat.mp4",
+    "status": "uploaded"
+  }
+}
+```
+
+## POST /api/videos/:videoId/comments
+Add trainer feedback comment to a video.
+
+Auth required: Yes
+Role required: `trainer`
+Access rules: trainer must be assigned to the video owner client.
+
+Request body:
+```json
+{
+  "comment": "Great effort. Keep your chest more upright in the first half of each rep."
+}
+```
+
+Success response (201):
+```json
+{
+  "message": "Feedback added successfully",
+  "comment": {
+    "_id": "6635ec0a1ad8c4f2b6e2a193",
+    "video": "6635ea2f1ad8c4f2b6e2a181",
+    "trainer": {
+      "_id": "6635d58f1ad8c4f2b6e2a101",
+      "name": "Trainer One",
+      "email": "trainer1@example.com",
+      "role": "trainer"
+    },
+    "comment": "Great effort. Keep your chest more upright in the first half of each rep.",
+    "createdAt": "2026-05-03T12:28:00.000Z"
+  }
+}
+```
+
+Notes:
+- Adding first comment marks video `status` as `reviewed`.
+
+## GET /api/videos/:videoId/comments
+Get all feedback comments for a video.
+
+Auth required: Yes
+Access rules:
+- Client can view comments on own video
+- Trainer can view comments only for assigned clients
+
+Success response (200):
+```json
+{
+  "comments": [
+    {
+      "_id": "6635ec0a1ad8c4f2b6e2a193",
+      "video": "6635ea2f1ad8c4f2b6e2a181",
+      "trainer": {
+        "_id": "6635d58f1ad8c4f2b6e2a101",
+        "name": "Trainer One",
+        "email": "trainer1@example.com",
+        "role": "trainer"
+      },
+      "comment": "Great effort. Keep your chest more upright in the first half of each rep.",
+      "createdAt": "2026-05-03T12:28:00.000Z"
+    }
+  ]
+}
+```
+
+## DELETE /api/videos/:videoId
+Delete video by owner client.
+
+Auth required: Yes
+Role required: `client`
+
+Behavior:
+- Deletes video metadata from DB
+- Deletes all related comments
+- Deletes file from local storage
+
+Success response (200):
+```json
+{
+  "message": "Video deleted successfully"
+}
+```
+
+## 7. Common Error Format
 
 Most error responses follow:
 ```json
@@ -590,7 +801,7 @@ Validation errors often include:
 }
 ```
 
-## 7. Frontend Integration Notes
+## 8. Frontend Integration Notes
 
 - Store token after signup/login and attach it in `Authorization` header for protected routes.
 - Role-aware UI:
@@ -600,8 +811,13 @@ Validation errors often include:
   1. Call `GET /api/users?role=client` to load dropdown/list of clients.
   2. Create trainer workout with `POST /api/workouts/trainer`.
   3. Assign via `POST /api/workouts/:id/assign`.
+- For video review flow:
+  1. Client uploads using `POST /api/videos/upload` (multipart, file field name `video`).
+  2. Trainer loads review list using `GET /api/videos/review`.
+  3. Trainer submits feedback via `POST /api/videos/:videoId/comments`.
+  4. Client reads feedback via `GET /api/videos/:videoId/comments`.
 
-## 8. Quick cURL Examples
+## 9. Quick cURL Examples
 
 ### Signup (trainer)
 ```bash
@@ -656,7 +872,26 @@ curl -X POST http://localhost:5000/api/workouts/<workoutId>/assign \
   }'
 ```
 
-## 9. Environment Variables Reminder
+### Upload client video
+```bash
+curl -X POST http://localhost:5000/api/videos/upload \
+  -H "Authorization: Bearer <client_token>" \
+  -F "title=Squat Form Check" \
+  -F "description=Please review depth and knee tracking" \
+  -F "video=@/absolute/path/to/squat.mp4"
+```
+
+### Trainer adds feedback comment
+```bash
+curl -X POST http://localhost:5000/api/videos/<videoId>/comments \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <trainer_token>" \
+  -d '{
+    "comment": "Good control overall. Keep your core tighter at the bottom."
+  }'
+```
+
+## 10. Environment Variables Reminder
 
 In your `.env` file:
 
@@ -666,6 +901,7 @@ MONGODB_URI=<your_mongodb_atlas_url>
 JWT_SECRET=<strong_secret>
 JWT_EXPIRES_IN=7d
 CORS_ORIGIN=*
+MAX_VIDEO_SIZE_MB=100
 ```
 
 MongoDB Atlas URL goes specifically in `MONGODB_URI`.

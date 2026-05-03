@@ -1,13 +1,8 @@
 const mongoose = require('mongoose');
 
-const exerciseVideoSchema = new mongoose.Schema(
+const videoSchema = new mongoose.Schema(
   {
     client: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    trainer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
@@ -24,19 +19,20 @@ const exerciseVideoSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      maxlength: 120,
     },
     description: {
       type: String,
       trim: true,
+      maxlength: 1000,
     },
-    originalFileName: {
+    fileName: {
       type: String,
       required: true,
     },
-    storedFileName: {
+    originalName: {
       type: String,
       required: true,
-      unique: true,
     },
     filePath: {
       type: String,
@@ -46,23 +42,26 @@ const exerciseVideoSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    fileSizeBytes: {
+    sizeBytes: {
       type: Number,
       required: true,
+      min: 1,
     },
     status: {
       type: String,
       enum: ['uploaded', 'reviewed'],
       default: 'uploaded',
     },
-    reviewedAt: Date,
+    uploadedAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-exerciseVideoSchema.index({ client: 1, createdAt: -1 });
-exerciseVideoSchema.index({ trainer: 1, createdAt: -1 });
+videoSchema.index({ client: 1, createdAt: -1 });
 
-module.exports = mongoose.model('ExerciseVideo', exerciseVideoSchema);
+module.exports = mongoose.model('Video', videoSchema);

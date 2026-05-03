@@ -1,4 +1,12 @@
 const errorHandler = (err, req, res, next) => {
+  if (err.name === 'MulterError') {
+    return res.status(400).json({ message: `Upload error: ${err.message}` });
+  }
+
+  if (err.message === 'Only video files are allowed.') {
+    return res.status(400).json({ message: err.message });
+  }
+
   const statusCode = err.statusCode || 500;
   const message = err.message || 'Internal server error';
 

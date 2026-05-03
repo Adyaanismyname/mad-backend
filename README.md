@@ -41,6 +41,8 @@ npm start
 
 Server starts at `http://localhost:5000` by default.
 
+Uploaded videos are stored locally in `uploads/videos` and served from `/uploads/...` URLs.
+
 ## 4. API Endpoints
 
 ### Auth
@@ -96,6 +98,18 @@ Signup body example (trainer):
 - `GET /api/workouts/assigned/me` (client only)
 - `GET /api/workouts/assigned/by-me` (trainer only)
 
+### Videos
+
+- `POST /api/videos/upload` (client only, multipart form-data with `video` file)
+- `GET /api/videos/mine` (client only)
+- `GET /api/videos/review` (trainer only, optional `clientId` query)
+- `GET /api/videos/:videoId` (owner client or assigned trainer)
+- `GET /api/videos/:videoId/comments` (owner client or assigned trainer)
+- `POST /api/videos/:videoId/comments` (trainer only)
+- `DELETE /api/videos/:videoId` (client owner only)
+
+Video upload size is controlled by `MAX_VIDEO_SIZE_MB` in `.env` (default 100 MB).
+
 Create workout body example:
 
 ```json
@@ -122,8 +136,8 @@ Assign workout body example:
 
 ## 5. Notes for your larger app roadmap
 
-This backend already covers your requested features for authentication, roles, profiles, and workout management. For the full Fit & Fuel scope, you can extend it next with:
+This backend already covers your requested features for authentication, roles, profiles, workout management, and video upload/feedback. For the full Fit & Fuel scope, you can extend it next with:
 
-- Video upload + timestamp feedback
+- Advanced video annotations (timestamp markers and overlay drawings)
 - Progress logs (weight, body measurements over time)
 - AI diet/workout suggestion endpoints
