@@ -1,27 +1,200 @@
 # Fit & Fuel Backend API Documentation
 
-This document is written for frontend integration.
-It describes every available endpoint, payload shape, auth requirements, and expected responses.
+Last updated: 2026-05-03
+Audience: Frontend team (web/mobile)
 
-## 1. Base Information
+This document is implementation-accurate for the current Express backend, including auth, profile, workouts, local video upload, and trainer feedback.
 
-- Base URL (local): `http://localhost:5000`
-- API Prefix: `/api`
-- Content-Type: `application/json`
-- Auth Type: Bearer JWT
+## 1. API Basics
 
-### Auth Header Format
+- Local base URL: http://localhost:8000
+- API prefix: /api
+- Health endpoint: GET /health
+- Request content type for JSON endpoints: application/json
+- Upload content type: multipart/form-data
+- Auth strategy: JWT Bearer token
+
+### 1.1 Auth Header
+
+Use this header for protected routes:
 
 ```http
-Authorization: Bearer <token>
+Authorization: Bearer <jwt_token>
 ```
 
-### Health Check
+### 1.2 Response Conventions
 
-#### GET /health
-Used to verify backend is alive.
+- Success responses generally return one of:
+  - message + payload object
+  - payload object list
+- Error responses generally return:
 
-Success response (200):
+```json
+{
+  "message": "Human readable error"
+}
+```
+
+Validation errors usually return:
+
+```json
+{
+  "message": "Validation failed",
+  "errors": [
+    {
+      "type": "field",
+      "value": "...",
+      "msg": "...",
+      "path": "...",
+      "location": "body"
+    }
+  ]
+}
+```
+
+## 2. Role-Based Access Matrix
+
+| Endpoint                               | Client         | Trainer                     |
+| -------------------------------------- | -------------- | --------------------------- |
+| POST /api/auth/signup                  | Yes            | Yes                         |
+| POST /api/auth/login                   | Yes            | Yes                         |
+| GET /api/auth/me                       | Yes            | Yes                         |
+| GET /api/users?role=client\|trainer    | Yes            | Yes                         |
+| PUT /api/users/profile                 | Yes            | Yes                         |
+| POST /api/workouts/client              | Yes            | No                          |
+| POST /api/workouts/trainer             | No             | Yes                         |
+| POST /api/workouts/:id/assign          | No             | Yes                         |
+| GET /api/workouts/mine                 | Yes            | Yes                         |
+| GET /api/workouts/assigned/me          | Yes            | No                          |
+| GET /api/workouts/assigned/by-me       | No             | Yes                         |
+| POST /api/videos/upload                | Yes            | No                          |
+| GET /api/videos/mine                   | Yes            | No                          |
+| GET /api/videos/review                 | No             | Yes                         |
+| GET /api/videos/:videoId               | Own video only | Assigned client videos only |
+| GET /api/videos/:videoId/comments      | Own video only | Assigned client videos only |
+| POST /api/videos/:videoId/comments     | No             | Assigned client videos only |
+| DELETE /api/videos/:videoId            | Own video only | No                          |
+| POST /api/relationships/request        | Yes            | No                          |
+| GET /api/relationships/my-requests     | Yes            | No                          |
+| GET /api/relationships/my-coach        | Yes            | No                          |
+| GET /api/relationships/incoming        | No             | Yes                         |
+| GET /api/relationships/my-clients      | No             | Yes                         |
+| PATCH /api/relationships/:id/accept    | No             | Yes                         |
+| PATCH /api/relationships/:id/reject    | No             | Yes                         |
+| PATCH /api/relationships/:id/terminate | Yes            | Yes                         |
+| POST /api/ai-plans/:clientId/diet      | No             | Yes                         |
+| POST /api/ai-plans/:clientId/workout   | No             | Yes                         |
+| GET /api/ai-plans/:clientId            | Yes (own only) | Yes (active clients only)   |
+| GET /api/ai-plans/mine                 | Yes            | No                          |
+| DELETE /api/ai-plans/:planId           | No             | Yes (own plans only)        |
+
+## 3. Domain Models
+
+## 3.1 User
+
+```json
+{
+  "_id": "string",
+  "name": "string",
+  "email": "string",
+  "role": "trainer | client",
+  "profile": {
+    "age": "number (client)",
+    "weight": "number (client)",
+    "bmi": "number (client)",
+    "experienceYears": "number (trainer)",
+    "expertise": "string (trainer)",
+    "bio": "string"
+  },
+  "createdAt": "ISO string",
+  "updatedAt": "ISO string"
+}
+```
+
+## 3.2 Workout
+
+```json
+{
+  "_id": "string",
+  "title": "string",
+  "description": "string",
+  "exercises": [
+    {
+      "name": "string",
+      "sets": "number",
+      "reps": "number",
+      "durationSec": "number",
+      "restSec": "number",
+      "notes": "string"
+    }
+  ],
+  "createdBy": "User._id",
+  "creatorRole": "trainer | client",
+  "createdAt": "ISO string",
+  "updatedAt": "ISO string"
+}
+```
+
+## 3.3 WorkoutAssignment
+
+```json
+{
+  "_id": "string",
+  "workout": "Workout._id",
+  "trainer": "User._id",
+  "client": "User._id",
+  "notes": "string",
+  "startDate": "ISO string",
+  "endDate": "ISO string",
+  "status": "assigned | in_progress | completed",
+  "createdAt": "ISO string",
+  "updatedAt": "ISO string"
+}
+```
+
+## 3.4 Video
+
+```json
+{
+  "_id": "string",
+  "client": "User._id",
+  "workout": "Workout._id | null",
+  "workoutAssignment": "WorkoutAssignment._id | null",
+  "title": "string",
+  "description": "string",
+  "fileName": "string",
+  "originalName": "string",
+  "filePath": "uploads/videos/<filename>",
+  "mimeType": "video/*",
+  "sizeBytes": "number",
+  "status": "uploaded | reviewed",
+  "uploadedAt": "ISO string",
+  "createdAt": "ISO string",
+  "updatedAt": "ISO string"
+}
+```
+
+## 3.5 VideoComment
+
+```json
+{
+  "_id": "string",
+  "video": "Video._id",
+  "trainer": "User._id",
+  "comment": "string",
+  "createdAt": "ISO string",
+  "updatedAt": "ISO string"
+}
+```
+
+## 4. Health
+
+## GET /health
+
+Checks if server is alive.
+
+Success 200:
+
 ```json
 {
   "status": "ok",
@@ -29,83 +202,14 @@ Success response (200):
 }
 ```
 
-## 2. Data Models (Frontend Reference)
-
-### User
-```json
-{
-  "_id": "6635d58f1ad8c4f2b6e2a101",
-  "name": "Trainer One",
-  "email": "trainer1@example.com",
-  "role": "trainer",
-  "profile": {
-    "experienceYears": 5,
-    "expertise": "Strength and Conditioning",
-    "bio": "Certified coach"
-  },
-  "createdAt": "2026-05-03T10:00:00.000Z",
-  "updatedAt": "2026-05-03T10:00:00.000Z"
-}
-```
-
-Client profile fields:
-- `age` (Number)
-- `weight` (Number)
-- `bmi` (Number)
-- `bio` (String, optional)
-
-Trainer profile fields:
-- `experienceYears` (Number)
-- `expertise` (String)
-- `bio` (String, optional)
-
-### Workout
-```json
-{
-  "_id": "6635d7bb1ad8c4f2b6e2a10f",
-  "title": "Upper Body Day",
-  "description": "Push + pull session",
-  "exercises": [
-    {
-      "name": "Push Up",
-      "sets": 4,
-      "reps": 12,
-      "durationSec": 0,
-      "restSec": 60,
-      "notes": "Keep core tight"
-    }
-  ],
-  "createdBy": "6635d58f1ad8c4f2b6e2a101",
-  "creatorRole": "trainer",
-  "createdAt": "2026-05-03T10:05:00.000Z",
-  "updatedAt": "2026-05-03T10:05:00.000Z"
-}
-```
-
-### Workout Assignment
-```json
-{
-  "_id": "6635d8ca1ad8c4f2b6e2a120",
-  "workout": "6635d7bb1ad8c4f2b6e2a10f",
-  "trainer": "6635d58f1ad8c4f2b6e2a101",
-  "client": "6635d60f1ad8c4f2b6e2a104",
-  "notes": "Do this 3x this week",
-  "startDate": "2026-05-03T00:00:00.000Z",
-  "endDate": "2026-05-10T00:00:00.000Z",
-  "status": "assigned",
-  "createdAt": "2026-05-03T10:10:00.000Z",
-  "updatedAt": "2026-05-03T10:10:00.000Z"
-}
-```
-
-## 3. Authentication Endpoints
+## 5. Auth Endpoints
 
 ## POST /api/auth/signup
-Register a new user as trainer or client.
 
-Auth required: No
+Registers a new user.
 
-Request body:
+### Body
+
 ```json
 {
   "name": "Client One",
@@ -121,18 +225,23 @@ Request body:
 }
 ```
 
-Notes:
-- `role` must be either `trainer` or `client`.
-- If role = `client`, required profile fields: `age`, `weight`, `bmi`.
-- If role = `trainer`, required profile fields: `experienceYears`, `expertise`.
+### Validation
 
-Success response (201):
+- name: required string
+- email: required valid email
+- password: required min length 6
+- role: required, one of trainer/client
+- If role=client, profile.age + profile.weight + profile.bmi are required
+- If role=trainer, profile.experienceYears + profile.expertise are required
+
+### Success 201
+
 ```json
 {
   "message": "Signup successful",
-  "token": "<jwt_token>",
+  "token": "<jwt>",
   "user": {
-    "id": "6635d60f1ad8c4f2b6e2a104",
+    "id": "...",
     "name": "Client One",
     "email": "client1@example.com",
     "role": "client",
@@ -146,16 +255,17 @@ Success response (201):
 }
 ```
 
-Error responses:
-- `400` validation failure or missing role-specific profile fields
-- `409` email already exists
+### Errors
+
+- 400 validation failure
+- 409 email already exists
 
 ## POST /api/auth/login
-Authenticate existing user.
 
-Auth required: No
+Authenticates existing user.
 
-Request body:
+### Body
+
 ```json
 {
   "email": "client1@example.com",
@@ -163,745 +273,1078 @@ Request body:
 }
 ```
 
-Success response (200):
-```json
-{
-  "message": "Login successful",
-  "token": "<jwt_token>",
-  "user": {
-    "id": "6635d60f1ad8c4f2b6e2a104",
-    "name": "Client One",
-    "email": "client1@example.com",
-    "role": "client",
-    "profile": {
-      "age": 24,
-      "weight": 70,
-      "bmi": 22.9,
-      "bio": "Beginner"
-    }
-  }
-}
-```
+### Success 200
 
-Error responses:
-- `400` validation failure
-- `401` invalid credentials
+Returns token and user object.
+
+### Errors
+
+- 400 validation failure
+- 401 invalid credentials
 
 ## GET /api/auth/me
-Get current logged-in user.
 
-Auth required: Yes (Bearer token)
-
-Success response (200):
-```json
-{
-  "user": {
-    "_id": "6635d60f1ad8c4f2b6e2a104",
-    "name": "Client One",
-    "email": "client1@example.com",
-    "role": "client",
-    "profile": {
-      "age": 24,
-      "weight": 70,
-      "bmi": 22.9,
-      "bio": "Beginner"
-    },
-    "createdAt": "2026-05-03T10:00:00.000Z",
-    "updatedAt": "2026-05-03T10:00:00.000Z"
-  }
-}
-```
-
-Error responses:
-- `401` token missing/invalid
-
-## 4. User Endpoints
-
-## GET /api/users?role=client|trainer
-List users by role.
-Useful for trainer UI to fetch clients before assigning workouts.
+Returns currently authenticated user.
 
 Auth required: Yes
 
-Query params:
-- `role` (required): `client` or `trainer`
+### Success 200
 
-Success response (200):
+```json
+{
+  "user": {
+    "_id": "...",
+    "name": "...",
+    "email": "...",
+    "role": "client",
+    "profile": {},
+    "createdAt": "...",
+    "updatedAt": "..."
+  }
+}
+```
+
+### Errors
+
+- 401 token missing/invalid
+
+## 6. User Endpoints
+
+## GET /api/users?role=client|trainer
+
+Lists users by role.
+
+Auth required: Yes
+
+### Query params
+
+- role: required, trainer or client
+
+### Success 200
+
 ```json
 {
   "users": [
     {
-      "_id": "6635d60f1ad8c4f2b6e2a104",
-      "name": "Client One",
-      "email": "client1@example.com",
+      "_id": "...",
+      "name": "...",
+      "email": "...",
       "role": "client",
-      "profile": {
-        "age": 24,
-        "weight": 70,
-        "bmi": 22.9,
-        "bio": "Beginner"
-      }
+      "profile": {}
     }
   ]
 }
 ```
 
-Error responses:
-- `400` invalid role query
-- `401` token missing/invalid
+### Errors
+
+- 400 invalid role query
+- 401 token missing/invalid
 
 ## PUT /api/users/profile
-Update own profile fields.
+
+Updates current user profile.
 
 Auth required: Yes
 
-Request body (client example):
+### Body (client example)
+
 ```json
 {
   "name": "Client One Updated",
   "profile": {
-    "age": 25,
-    "weight": 68,
-    "bmi": 22.1,
-    "bio": "Intermediate"
+    "age": 26,
+    "weight": 69,
+    "bmi": 22.3,
+    "bio": "Consistency focus"
   }
 }
 ```
 
-Request body (trainer example):
+### Body (trainer example)
+
 ```json
 {
   "name": "Trainer One Updated",
   "profile": {
-    "experienceYears": 6,
-    "expertise": "Fat Loss",
-    "bio": "ISSA Certified"
+    "experienceYears": 7,
+    "expertise": "Strength",
+    "bio": "Certified trainer"
   }
 }
 ```
 
-Role behavior:
-- Client can update only: `profile.age`, `profile.weight`, `profile.bmi`, `profile.bio`, `name`
-- Trainer can update only: `profile.experienceYears`, `profile.expertise`, `profile.bio`, `name`
+### Role-specific update behavior
 
-Success response (200):
+- Client can update: name, profile.age, profile.weight, profile.bmi, profile.bio
+- Trainer can update: name, profile.experienceYears, profile.expertise, profile.bio
+
+### Success 200
+
 ```json
 {
   "message": "Profile updated successfully",
   "user": {
-    "_id": "6635d60f1ad8c4f2b6e2a104",
-    "name": "Client One Updated",
-    "email": "client1@example.com",
-    "role": "client",
-    "profile": {
-      "age": 25,
-      "weight": 68,
-      "bmi": 22.1,
-      "bio": "Intermediate"
-    },
-    "createdAt": "2026-05-03T10:00:00.000Z",
-    "updatedAt": "2026-05-03T11:00:00.000Z"
+    "_id": "...",
+    "name": "...",
+    "email": "...",
+    "role": "...",
+    "profile": {}
   }
 }
 ```
 
-Error responses:
-- `400` validation failure
-- `401` token missing/invalid
+### Errors
 
-## 5. Workout Endpoints
+- 400 validation failure
+- 401 token missing/invalid
+
+## 7. Workout Endpoints
 
 ## POST /api/workouts/trainer
-Create workout as trainer.
+
+Creates workout as trainer.
 
 Auth required: Yes
-Role required: `trainer`
+Role required: trainer
 
-Request body:
+### Body
+
 ```json
 {
   "title": "Upper Body Day",
-  "description": "Push + pull focus",
+  "description": "Push and pull focus",
   "exercises": [
     {
       "name": "Push Up",
       "sets": 4,
       "reps": 12,
-      "durationSec": 0,
       "restSec": 60,
-      "notes": "Keep core tight"
-    },
-    {
-      "name": "Dumbbell Row",
-      "sets": 4,
-      "reps": 10,
-      "restSec": 90,
-      "notes": "Control eccentric"
+      "notes": "Control form"
     }
   ]
 }
 ```
 
-Success response (201):
-```json
-{
-  "message": "Workout created successfully",
-  "workout": {
-    "_id": "6635d7bb1ad8c4f2b6e2a10f",
-    "title": "Upper Body Day",
-    "description": "Push + pull focus",
-    "exercises": [
-      {
-        "name": "Push Up",
-        "sets": 4,
-        "reps": 12,
-        "durationSec": 0,
-        "restSec": 60,
-        "notes": "Keep core tight"
-      }
-    ],
-    "createdBy": "6635d58f1ad8c4f2b6e2a101",
-    "creatorRole": "trainer",
-    "createdAt": "2026-05-03T10:05:00.000Z",
-    "updatedAt": "2026-05-03T10:05:00.000Z"
-  }
-}
-```
+### Validation
 
-Error responses:
-- `400` validation failure
-- `401` token missing/invalid
-- `403` forbidden role
+- title: required non-empty string
+- exercises: required non-empty array
+- exercises.\*.name: required
+- numeric fields (sets/reps/durationSec/restSec): numeric if provided
+
+### Success 201
+
+Returns created workout object.
+
+### Errors
+
+- 400 validation failure
+- 401 token missing/invalid
+- 403 forbidden role
 
 ## POST /api/workouts/client
-Create workout as client (self-custom workout).
+
+Creates workout as client.
 
 Auth required: Yes
-Role required: `client`
+Role required: client
 
-Request body: same as trainer workout creation.
-
-Success response: same structure as trainer create workout.
-
-Error responses:
-- `400` validation failure
-- `401` token missing/invalid
-- `403` forbidden role
+Validation and response same as trainer creation.
 
 ## POST /api/workouts/:id/assign
-Assign trainer-created workout to a client.
+
+Assigns trainer workout to a client.
 
 Auth required: Yes
-Role required: `trainer`
+Role required: trainer
 
-Path params:
-- `id`: Workout ID
+### Path params
 
-Request body:
+- id: required Mongo ObjectId for workout
+
+### Body
+
 ```json
 {
-  "clientId": "6635d60f1ad8c4f2b6e2a104",
-  "notes": "Do this 3x this week",
+  "clientId": "<client_user_id>",
+  "notes": "Do this plan 3 times this week",
   "startDate": "2026-05-03",
   "endDate": "2026-05-10"
 }
 ```
 
-Business rules:
-- Workout must exist.
-- Trainer can assign only workouts created by themselves and where `creatorRole` is `trainer`.
-- `clientId` must belong to a user with role `client`.
-- Assignment is upserted by (`workout`, `client`) pair.
+### Business rules
 
-Success response (200):
+- Workout must exist.
+- Workout must be trainer-created by current trainer.
+- clientId must belong to a user with role=client.
+- Upsert behavior: assignment is unique for (workout, client).
+
+### Success 200
+
 ```json
 {
   "message": "Workout assigned successfully",
   "assignment": {
-    "_id": "6635d8ca1ad8c4f2b6e2a120",
-    "workout": {
-      "_id": "6635d7bb1ad8c4f2b6e2a10f",
-      "title": "Upper Body Day",
-      "description": "Push + pull focus",
-      "exercises": [
-        {
-          "name": "Push Up",
-          "sets": 4,
-          "reps": 12,
-          "restSec": 60
-        }
-      ],
-      "createdBy": "6635d58f1ad8c4f2b6e2a101",
-      "creatorRole": "trainer"
-    },
-    "trainer": {
-      "_id": "6635d58f1ad8c4f2b6e2a101",
-      "name": "Trainer One",
-      "email": "trainer1@example.com",
-      "role": "trainer"
-    },
-    "client": {
-      "_id": "6635d60f1ad8c4f2b6e2a104",
-      "name": "Client One",
-      "email": "client1@example.com",
-      "role": "client"
-    },
-    "notes": "Do this 3x this week",
-    "startDate": "2026-05-03T00:00:00.000Z",
-    "endDate": "2026-05-10T00:00:00.000Z",
-    "status": "assigned",
-    "createdAt": "2026-05-03T10:10:00.000Z",
-    "updatedAt": "2026-05-03T10:10:00.000Z"
+    "_id": "...",
+    "workout": {},
+    "trainer": {},
+    "client": {},
+    "notes": "...",
+    "startDate": "...",
+    "endDate": "...",
+    "status": "assigned"
   }
 }
 ```
 
-Error responses:
-- `400` invalid workout id/client id/validation failure
-- `401` token missing/invalid
-- `403` cannot assign workouts not created by this trainer
-- `404` workout not found
+### Errors
+
+- 400 validation failure or invalid clientId
+- 401 token missing/invalid
+- 403 assigning workout not created by current trainer
+- 404 workout not found
 
 ## GET /api/workouts/mine
-Get workouts created by current user (trainer or client).
+
+Gets workouts created by current user.
 
 Auth required: Yes
 
-Success response (200):
+### Success 200
+
 ```json
 {
   "workouts": [
     {
-      "_id": "6635d7bb1ad8c4f2b6e2a10f",
-      "title": "Upper Body Day",
-      "description": "Push + pull focus",
-      "exercises": [
-        { "name": "Push Up", "sets": 4, "reps": 12, "restSec": 60 }
-      ],
-      "createdBy": "6635d58f1ad8c4f2b6e2a101",
-      "creatorRole": "trainer",
-      "createdAt": "2026-05-03T10:05:00.000Z",
-      "updatedAt": "2026-05-03T10:05:00.000Z"
+      "_id": "...",
+      "title": "..."
     }
   ]
 }
 ```
-
-Error responses:
-- `401` token missing/invalid
 
 ## GET /api/workouts/assigned/me
-Get workouts assigned to current client.
+
+Gets assignments for current client.
 
 Auth required: Yes
-Role required: `client`
+Role required: client
 
-Success response (200):
+### Success 200
+
 ```json
 {
   "assignments": [
     {
-      "_id": "6635d8ca1ad8c4f2b6e2a120",
-      "workout": {
-        "_id": "6635d7bb1ad8c4f2b6e2a10f",
-        "title": "Upper Body Day"
-      },
-      "trainer": {
-        "_id": "6635d58f1ad8c4f2b6e2a101",
-        "name": "Trainer One",
-        "email": "trainer1@example.com",
-        "profile": {
-          "expertise": "Strength and Conditioning"
-        }
-      },
-      "notes": "Do this 3x this week",
-      "startDate": "2026-05-03T00:00:00.000Z",
-      "endDate": "2026-05-10T00:00:00.000Z",
+      "_id": "...",
+      "workout": {},
+      "trainer": {},
       "status": "assigned"
     }
   ]
 }
 ```
-
-Error responses:
-- `401` token missing/invalid
-- `403` forbidden role
 
 ## GET /api/workouts/assigned/by-me
-Get assignments created by current trainer.
+
+Gets assignments created by current trainer.
 
 Auth required: Yes
-Role required: `trainer`
+Role required: trainer
 
-Success response (200):
+### Success 200
+
 ```json
 {
   "assignments": [
     {
-      "_id": "6635d8ca1ad8c4f2b6e2a120",
-      "workout": {
-        "_id": "6635d7bb1ad8c4f2b6e2a10f",
-        "title": "Upper Body Day"
-      },
-      "client": {
-        "_id": "6635d60f1ad8c4f2b6e2a104",
-        "name": "Client One",
-        "email": "client1@example.com",
-        "profile": {
-          "age": 24,
-          "weight": 70,
-          "bmi": 22.9
-        }
-      },
-      "notes": "Do this 3x this week",
-      "startDate": "2026-05-03T00:00:00.000Z",
-      "endDate": "2026-05-10T00:00:00.000Z",
+      "_id": "...",
+      "workout": {},
+      "client": {},
       "status": "assigned"
     }
   ]
 }
 ```
 
-Error responses:
-- `401` token missing/invalid
-- `403` forbidden role
+## 8. Video Upload and Feedback Endpoints
 
-## 6. Video Upload and Feedback Endpoints
+Video files are stored locally under uploads/videos and are served via /uploads/videos/<fileName>.
 
 ## POST /api/videos/upload
-Upload a workout video by client.
+
+Uploads a video for current client.
 
 Auth required: Yes
-Role required: `client`
-Content-Type: `multipart/form-data`
+Role required: client
+Content type: multipart/form-data
 
-Form-data fields:
-- `video` (required, file)
-- `title` (optional, string, 2-120 chars)
-- `description` (optional, string, max 1000 chars)
-- `workoutId` (optional, Mongo ID, must belong to current client)
-- `workoutAssignmentId` (optional, Mongo ID, must belong to current client)
+### Form fields
 
-Success response (201):
+- video: required file, mime type must start with video/
+- title: optional string, 2-120 chars
+- description: optional string, max 1000 chars
+- exerciseName: optional string, max 100 chars — the name of the exercise this video demonstrates (e.g. "Push Up", "Squat")
+- workoutId: optional Mongo ObjectId
+- workoutAssignmentId: optional Mongo ObjectId
+
+### Business rules
+
+If workoutId is provided:
+
+- workout must exist
+- workout must be either:
+  - created by current client, or
+  - assigned to current client via WorkoutAssignment
+
+If workoutAssignmentId is provided:
+
+- assignment must exist
+- assignment.client must match current client
+
+### Success 201
+
 ```json
 {
   "message": "Video uploaded successfully",
   "video": {
-    "_id": "6635ea2f1ad8c4f2b6e2a181",
-    "client": "6635d60f1ad8c4f2b6e2a104",
-    "title": "Leg Day Form Check",
-    "description": "Please review squat depth",
-    "fileName": "1746278353123-squat.mp4",
-    "originalName": "squat.mp4",
-    "filePath": "uploads/videos/1746278353123-squat.mp4",
+    "_id": "...",
+    "client": "...",
+    "workout": "...",
+    "workoutAssignment": "...",
+    "title": "Squat Form Check",
+    "description": "Please review",
+    "exerciseName": "Squat",
+    "fileName": "1777795738103-squat-test.mp4",
+    "originalName": "squat-test.mp4",
+    "filePath": "uploads/videos/1777795738103-squat-test.mp4",
     "mimeType": "video/mp4",
-    "sizeBytes": 7340032,
+    "sizeBytes": 12345,
     "status": "uploaded",
-    "uploadedAt": "2026-05-03T12:20:10.000Z",
-    "createdAt": "2026-05-03T12:20:10.000Z",
-    "updatedAt": "2026-05-03T12:20:10.000Z"
+    "uploadedAt": "..."
   },
-  "playbackUrl": "/uploads/videos/1746278353123-squat.mp4"
+  "playbackUrl": "/uploads/videos/1777795738103-squat-test.mp4"
 }
 ```
 
-Error responses:
-- `400` missing file, invalid field values, unsupported file type, file too large
-- `401` token missing/invalid
-- `403` forbidden role
-- `404` linked workout or assignment not found
+### Errors
+
+- 400 missing file, invalid payload, non-video file, file too large
+- 401 token missing/invalid
+- 403 forbidden role or invalid ownership/linking rule
+- 404 workout or assignment not found
 
 ## GET /api/videos/mine
-Get all videos uploaded by current client.
+
+Returns videos uploaded by current client.
 
 Auth required: Yes
-Role required: `client`
+Role required: client
 
-Success response (200):
+### Success 200
+
 ```json
 {
   "videos": [
     {
-      "_id": "6635ea2f1ad8c4f2b6e2a181",
-      "client": "6635d60f1ad8c4f2b6e2a104",
-      "title": "Leg Day Form Check",
-      "description": "Please review squat depth",
-      "status": "reviewed",
-      "filePath": "uploads/videos/1746278353123-squat.mp4",
-      "mimeType": "video/mp4",
-      "sizeBytes": 7340032,
-      "createdAt": "2026-05-03T12:20:10.000Z"
+      "_id": "...",
+      "title": "...",
+      "exerciseName": "Push Up",
+      "status": "uploaded | reviewed",
+      "workout": {
+        "_id": "...",
+        "title": "..."
+      },
+      "workoutAssignment": {
+        "_id": "...",
+        "status": "assigned",
+        "startDate": "...",
+        "endDate": "..."
+      }
     }
   ]
 }
 ```
 
 ## GET /api/videos/review
-Get all videos from clients assigned to current trainer.
+
+Returns videos for trainer review (assigned clients only).
 
 Auth required: Yes
-Role required: `trainer`
+Role required: trainer
 
-Query params:
-- `clientId` (optional, Mongo ID). If provided, trainer must be assigned to that client.
+### Query params
 
-Success response (200):
+- clientId: optional Mongo ObjectId filter
+
+### Access behavior
+
+- Without clientId: returns videos for all clients assigned to this trainer
+- With clientId: allowed only if trainer has at least one assignment with that client
+
+### Success 200
+
 ```json
 {
   "videos": [
     {
-      "_id": "6635ea2f1ad8c4f2b6e2a181",
+      "_id": "...",
       "client": {
-        "_id": "6635d60f1ad8c4f2b6e2a104",
-        "name": "Client One",
-        "email": "client1@example.com"
+        "_id": "...",
+        "name": "...",
+        "email": "..."
       },
-      "title": "Leg Day Form Check",
-      "status": "uploaded",
-      "filePath": "uploads/videos/1746278353123-squat.mp4",
-      "createdAt": "2026-05-03T12:20:10.000Z"
+      "title": "...",
+      "exerciseName": "Squat",
+      "status": "uploaded | reviewed"
     }
   ]
 }
 ```
 
-Error responses:
-- `401` token missing/invalid
-- `403` forbidden role or trainer not assigned to target client
+### Errors
+
+- 400 invalid clientId format
+- 401 token missing/invalid
+- 403 trainer not allowed for target client
 
 ## GET /api/videos/:videoId
-Get a single video detail.
+
+Gets a single video.
 
 Auth required: Yes
-Access rules:
-- Client can access only own video
-- Trainer can access only videos of assigned clients
 
-Success response (200):
+### Access behavior
+
+- Client can read own video only
+- Trainer can read video only if assigned to that client
+
+### Success 200
+
 ```json
 {
   "video": {
-    "_id": "6635ea2f1ad8c4f2b6e2a181",
+    "_id": "...",
     "client": {
-      "_id": "6635d60f1ad8c4f2b6e2a104",
-      "name": "Client One",
-      "email": "client1@example.com"
+      "_id": "...",
+      "name": "...",
+      "email": "..."
     },
-    "title": "Leg Day Form Check",
-    "description": "Please review squat depth",
-    "filePath": "uploads/videos/1746278353123-squat.mp4",
-    "status": "uploaded"
+    "workout": {
+      "_id": "...",
+      "title": "..."
+    },
+    "workoutAssignment": {
+      "_id": "...",
+      "status": "assigned"
+    },
+    "title": "...",
+    "description": "...",
+    "filePath": "uploads/videos/...",
+    "mimeType": "video/mp4",
+    "sizeBytes": 12345,
+    "status": "uploaded | reviewed"
   }
 }
 ```
 
-## POST /api/videos/:videoId/comments
-Add trainer feedback comment to a video.
+### Errors
 
-Auth required: Yes
-Role required: `trainer`
-Access rules: trainer must be assigned to the video owner client.
-
-Request body:
-```json
-{
-  "comment": "Great effort. Keep your chest more upright in the first half of each rep."
-}
-```
-
-Success response (201):
-```json
-{
-  "message": "Feedback added successfully",
-  "comment": {
-    "_id": "6635ec0a1ad8c4f2b6e2a193",
-    "video": "6635ea2f1ad8c4f2b6e2a181",
-    "trainer": {
-      "_id": "6635d58f1ad8c4f2b6e2a101",
-      "name": "Trainer One",
-      "email": "trainer1@example.com",
-      "role": "trainer"
-    },
-    "comment": "Great effort. Keep your chest more upright in the first half of each rep.",
-    "createdAt": "2026-05-03T12:28:00.000Z"
-  }
-}
-```
-
-Notes:
-- Adding first comment marks video `status` as `reviewed`.
+- 400 invalid videoId format
+- 401 token missing/invalid
+- 403 not allowed
+- 404 video not found
 
 ## GET /api/videos/:videoId/comments
-Get all feedback comments for a video.
+
+Gets all comments for a video.
 
 Auth required: Yes
-Access rules:
-- Client can view comments on own video
-- Trainer can view comments only for assigned clients
 
-Success response (200):
+### Access behavior
+
+- Client: own video only
+- Trainer: assigned client video only
+
+### Success 200
+
 ```json
 {
   "comments": [
     {
-      "_id": "6635ec0a1ad8c4f2b6e2a193",
-      "video": "6635ea2f1ad8c4f2b6e2a181",
+      "_id": "...",
+      "video": "...",
       "trainer": {
-        "_id": "6635d58f1ad8c4f2b6e2a101",
-        "name": "Trainer One",
-        "email": "trainer1@example.com",
-        "role": "trainer"
+        "_id": "...",
+        "name": "...",
+        "email": "...",
+        "role": "trainer",
+        "profile": {
+          "expertise": "..."
+        }
       },
-      "comment": "Great effort. Keep your chest more upright in the first half of each rep.",
-      "createdAt": "2026-05-03T12:28:00.000Z"
+      "comment": "Keep chest up and knees out.",
+      "createdAt": "..."
     }
   ]
 }
 ```
 
-## DELETE /api/videos/:videoId
-Delete video by owner client.
+## POST /api/videos/:videoId/comments
+
+Adds trainer feedback to video (general comment, no timestamp required).
 
 Auth required: Yes
-Role required: `client`
+Role required: trainer
 
-Behavior:
-- Deletes video metadata from DB
-- Deletes all related comments
-- Deletes file from local storage
+### Body
 
-Success response (200):
+```json
+{
+  "comment": "Good control. Keep your core tighter during descent."
+}
+```
+
+### Validation
+
+- comment required
+- comment length: 2 to 2000
+
+### Side effect
+
+- Video status is updated to reviewed after adding comment.
+
+### Success 201
+
+```json
+{
+  "message": "Feedback added successfully",
+  "comment": {
+    "_id": "...",
+    "video": "...",
+    "trainer": {
+      "_id": "...",
+      "name": "...",
+      "email": "..."
+    },
+    "comment": "...",
+    "createdAt": "..."
+  }
+}
+```
+
+### Errors
+
+- 400 validation failure or invalid videoId
+- 401 token missing/invalid
+- 403 not allowed to review this client's video
+- 404 video not found
+
+## DELETE /api/videos/:videoId
+
+Deletes current client's own video.
+
+Auth required: Yes
+Role required: client
+
+### Behavior
+
+- Deletes video record
+- Deletes related VideoComment records
+- Deletes local file from disk if exists
+
+### Success 200
+
 ```json
 {
   "message": "Video deleted successfully"
 }
 ```
 
-## 7. Common Error Format
+### Errors
 
-Most error responses follow:
+- 400 invalid videoId
+- 401 token missing/invalid
+- 403 not owner
+- 404 video not found
+
+## 9. Static Video Playback
+
+Video URLs returned as playbackUrl are publicly served through:
+
+- GET /uploads/videos/<fileName>
+
+Current behavior:
+
+- No JWT required at file-serving layer.
+
+Frontend recommendation:
+
+- Treat direct URL sharing as public unless backend is updated to signed/protected media URLs.
+
+## 10. Coach-Client Relationships
+
+All relationship state is stored server-side. The frontend must **not** use SharedPreferences or local storage for request/connection state.
+
+### Relationship lifecycle
+
+```
+client sends request  →  status: pending
+coach accepts         →  status: active
+coach rejects         →  status: rejected
+either terminates     →  status: terminated
+```
+
+A new request is only allowed when no `pending` or `active` record exists for the same coach+client pair.
+
+---
+
+### POST /api/relationships/request
+
+Client sends a coaching request.
+
+Auth required: Yes
+Role required: client
+
+#### Request body
+
 ```json
 {
-  "message": "Human readable error message"
+  "coachId": "<trainer_user_id>",
+  "message": "Hi, I'd like you to coach me." // optional, max 500 chars
 }
 ```
 
-Validation errors often include:
+#### Success 201
+
 ```json
 {
-  "message": "Validation failed",
-  "errors": [
+  "message": "Request sent successfully.",
+  "relationship": {
+    "_id": "...",
+    "coach": "<trainer_id>",
+    "client": "<client_id>",
+    "status": "pending",
+    "message": "Hi, I'd like you to coach me.",
+    "requestedAt": "..."
+  }
+}
+```
+
+#### Errors
+
+- 400 validation failed (invalid coachId)
+- 404 coach not found or target is not a trainer
+- 409 pending or active relationship already exists
+
+---
+
+### GET /api/relationships/my-requests
+
+Client: list all requests they have sent (any status).
+
+Auth required: Yes
+Role required: client
+
+#### Success 200
+
+```json
+{
+  "relationships": [
     {
-      "type": "field",
-      "msg": "title is required",
-      "path": "title",
-      "location": "body"
+      "_id": "...",
+      "coach": { "_id": "...", "name": "...", "email": "...", "profile": {} },
+      "status": "pending | active | rejected | terminated",
+      "requestedAt": "...",
+      "resolvedAt": "..."
     }
   ]
 }
 ```
 
-## 8. Frontend Integration Notes
+---
 
-- Store token after signup/login and attach it in `Authorization` header for protected routes.
-- Role-aware UI:
-  - If `role = trainer`, show trainer create/assign flows.
-  - If `role = client`, show assigned workouts and client custom workout creation.
-- For assignment flow:
-  1. Call `GET /api/users?role=client` to load dropdown/list of clients.
-  2. Create trainer workout with `POST /api/workouts/trainer`.
-  3. Assign via `POST /api/workouts/:id/assign`.
-- For video review flow:
-  1. Client uploads using `POST /api/videos/upload` (multipart, file field name `video`).
-  2. Trainer loads review list using `GET /api/videos/review`.
-  3. Trainer submits feedback via `POST /api/videos/:videoId/comments`.
-  4. Client reads feedback via `GET /api/videos/:videoId/comments`.
+### GET /api/relationships/my-coach
 
-## 9. Quick cURL Examples
+Client: get their currently active coach (if any).
 
-### Signup (trainer)
-```bash
-curl -X POST http://localhost:5000/api/auth/signup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Trainer One",
-    "email": "trainer1@example.com",
-    "password": "secret123",
-    "role": "trainer",
-    "profile": {
-      "experienceYears": 5,
-      "expertise": "Strength and Conditioning"
+Auth required: Yes
+Role required: client
+
+#### Success 200
+
+```json
+{
+  "relationship": {
+    "_id": "...",
+    "coach": { "_id": "...", "name": "...", "email": "...", "profile": {} },
+    "status": "active",
+    "resolvedAt": "..."
+  }
+}
+```
+
+Returns `{ "relationship": null }` if the client has no active coach.
+
+---
+
+### GET /api/relationships/incoming
+
+Trainer: list all pending requests received.
+
+Auth required: Yes
+Role required: trainer
+
+#### Success 200
+
+```json
+{
+  "relationships": [
+    {
+      "_id": "...",
+      "client": { "_id": "...", "name": "...", "email": "...", "profile": {} },
+      "status": "pending",
+      "message": "...",
+      "requestedAt": "..."
     }
-  }'
+  ]
+}
 ```
 
-### Login
-```bash
-curl -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "trainer1@example.com",
-    "password": "secret123"
-  }'
+---
+
+### GET /api/relationships/my-clients
+
+Trainer: list all active clients. **Use this instead of GET /api/users?role=client for the coach's client list.**
+
+Auth required: Yes
+Role required: trainer
+
+#### Success 200
+
+```json
+{
+  "relationships": [
+    {
+      "_id": "...",
+      "client": { "_id": "...", "name": "...", "email": "...", "profile": {} },
+      "status": "active",
+      "resolvedAt": "..."
+    }
+  ]
+}
 ```
 
-### Create trainer workout
-```bash
-curl -X POST http://localhost:5000/api/workouts/trainer \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{
-    "title": "Upper Body Day",
-    "description": "Push + pull focus",
-    "exercises": [
-      {"name": "Push Up", "sets": 4, "reps": 12, "restSec": 60}
-    ]
-  }'
+---
+
+### PATCH /api/relationships/:id/accept
+
+Trainer: accept a pending request.
+
+Auth required: Yes
+Role required: trainer
+
+#### Success 200
+
+```json
+{ "message": "Request accepted.", "relationship": { "status": "active", ... } }
 ```
 
-### Assign workout
-```bash
-curl -X POST http://localhost:5000/api/workouts/<workoutId>/assign \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <trainer_token>" \
-  -d '{
-    "clientId": "<clientId>",
-    "notes": "3x this week",
-    "startDate": "2026-05-03",
-    "endDate": "2026-05-10"
-  }'
+#### Errors
+
+- 404 pending request not found or not owned by this trainer
+
+---
+
+### PATCH /api/relationships/:id/reject
+
+Trainer: reject a pending request.
+
+Auth required: Yes
+Role required: trainer
+
+#### Success 200
+
+```json
+{ "message": "Request rejected.", "relationship": { "status": "rejected", ... } }
 ```
 
-### Upload client video
-```bash
-curl -X POST http://localhost:5000/api/videos/upload \
-  -H "Authorization: Bearer <client_token>" \
-  -F "title=Squat Form Check" \
-  -F "description=Please review depth and knee tracking" \
-  -F "video=@/absolute/path/to/squat.mp4"
+---
+
+### PATCH /api/relationships/:id/terminate
+
+Either party: end an active relationship.
+
+Auth required: Yes
+Role required: client or trainer
+
+#### Success 200
+
+```json
+{ "message": "Relationship terminated.", "relationship": { "status": "terminated", ... } }
 ```
 
-### Trainer adds feedback comment
-```bash
-curl -X POST http://localhost:5000/api/videos/<videoId>/comments \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <trainer_token>" \
-  -d '{
-    "comment": "Good control overall. Keep your core tighter at the bottom."
-  }'
+#### Errors
+
+- 404 active relationship not found or caller is not a party
+
+---
+
+## 10.1 AI-Generated Plans (Gemini)
+
+Trainers can generate personalized **diet** and **workout** plans for their active clients using Google Gemini. Plans are generated from the client's stored profile (age, weight, BMI, bio/goals) plus optional free-text coach notes. All generated plans are saved to the database so both trainers and clients can retrieve them later.
+
+**Requires:** `GEMINI_API_KEY` in `.env`. The trainer must have an active coach-client relationship with the target client.
+
+---
+
+### POST /api/ai-plans/:clientId/diet
+
+Generate a personalized 7-day meal plan for a client.
+
+Auth required: Yes
+Role required: trainer
+
+#### Request body
+
+```json
+{
+  "coachNotes": "Client is vegetarian and has a mild knee injury."
+}
 ```
 
-## 10. Environment Variables Reminder
+`coachNotes` is optional (max 1000 chars). If omitted, the plan is built purely from the client's stored profile.
 
-In your `.env` file:
+#### Success 201
+
+```json
+{
+  "message": "Diet plan generated successfully.",
+  "plan": {
+    "_id": "...",
+    "client": "<client_id>",
+    "generatedBy": "<trainer_id>",
+    "type": "diet",
+    "coachNotes": "Client is vegetarian...",
+    "clientSnapshot": {
+      "name": "Alex",
+      "age": 24,
+      "weight": 78,
+      "bmi": 24.1,
+      "bio": "Wants to lose 5kg and build core strength"
+    },
+    "content": "## Day 1\n### Breakfast\n...",
+    "createdAt": "..."
+  }
+}
+```
+
+`content` is a full markdown-formatted 7-day meal plan including macro targets, daily caloric intake, per-meal ingredient lists, calorie counts, and preparation tips.
+
+#### Errors
+
+- 400 invalid clientId or coachNotes too long
+- 403 no active relationship with this client
+- 404 client not found
+
+---
+
+### POST /api/ai-plans/:clientId/workout
+
+Generate a personalized weekly workout plan for a client.
+
+Auth required: Yes
+Role required: trainer
+
+#### Request body
+
+```json
+{
+  "coachNotes": "Client has bad knees — avoid high-impact exercises."
+}
+```
+
+#### Success 201
+
+```json
+{
+  "message": "Workout plan generated successfully.",
+  "plan": {
+    "_id": "...",
+    "type": "workout",
+    "content": "## Day 1 — Chest & Triceps\n### Warm-Up\n...",
+    "createdAt": "..."
+  }
+}
+```
+
+`content` is a markdown-formatted weekly plan with training split rationale, daily warm-up, main exercises (sets × reps, rest period, coaching cue), cool-down, and a week-over-week progression note.
+
+#### Errors
+
+- 400 invalid clientId or coachNotes too long
+- 403 no active relationship with this client
+- 404 client not found
+
+---
+
+### GET /api/ai-plans/mine
+
+Client: retrieve all AI-generated plans for themselves.
+
+Auth required: Yes
+Role required: client
+
+#### Query params
+
+- `type`: optional — `diet` or `workout` to filter by type
+
+#### Success 200
+
+```json
+{
+  "plans": [
+    {
+      "_id": "...",
+      "type": "diet | workout",
+      "generatedBy": { "_id": "...", "name": "Coach Sam", "email": "..." },
+      "coachNotes": "...",
+      "content": "...",
+      "createdAt": "..."
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/ai-plans/:clientId
+
+Trainer or client: retrieve all AI plans for a specific client.
+
+- **Client**: `clientId` must match their own `_id`.
+- **Trainer**: must have an active relationship with the client.
+
+Auth required: Yes
+
+#### Query params
+
+- `type`: optional — `diet` or `workout`
+
+#### Success 200
+
+Same shape as `GET /api/ai-plans/mine`.
+
+---
+
+### DELETE /api/ai-plans/:planId
+
+Trainer: delete a plan they generated (e.g. to replace with a newer one).
+
+Auth required: Yes
+Role required: trainer
+
+#### Success 200
+
+```json
+{ "message": "Plan deleted." }
+```
+
+#### Errors
+
+- 404 plan not found or not owned by this trainer
+
+---
+
+## 11. Full Endpoint Catalog
+
+| Method | Path                             | Auth | Role                    |
+| ------ | -------------------------------- | ---- | ----------------------- |
+| GET    | /health                          | No   | Any                     |
+| POST   | /api/auth/signup                 | No   | Any                     |
+| POST   | /api/auth/login                  | No   | Any                     |
+| GET    | /api/auth/me                     | Yes  | Any                     |
+| GET    | /api/users                       | Yes  | Any                     |
+| PUT    | /api/users/profile               | Yes  | Any                     |
+| POST   | /api/workouts/trainer            | Yes  | Trainer                 |
+| POST   | /api/workouts/client             | Yes  | Client                  |
+| POST   | /api/workouts/:id/assign         | Yes  | Trainer                 |
+| GET    | /api/workouts/mine               | Yes  | Any                     |
+| GET    | /api/workouts/assigned/me        | Yes  | Client                  |
+| GET    | /api/workouts/assigned/by-me     | Yes  | Trainer                 |
+| POST   | /api/videos/upload               | Yes  | Client                  |
+| GET    | /api/videos/mine                 | Yes  | Client                  |
+| GET    | /api/videos/review               | Yes  | Trainer                 |
+| GET    | /api/videos/:videoId             | Yes  | Client/Trainer (scoped) |
+| GET    | /api/videos/:videoId/comments    | Yes  | Client/Trainer (scoped) |
+| POST   | /api/videos/:videoId/comments    | Yes  | Trainer (scoped)        |
+| DELETE | /api/videos/:videoId             | Yes  | Client (owner)          |
+| POST   | /api/relationships/request       | Yes  | Client                  |
+| GET    | /api/relationships/my-requests   | Yes  | Client                  |
+| GET    | /api/relationships/my-coach      | Yes  | Client                  |
+| GET    | /api/relationships/incoming      | Yes  | Trainer                 |
+| GET    | /api/relationships/my-clients    | Yes  | Trainer                 |
+| PATCH  | /api/relationships/:id/accept    | Yes  | Trainer                 |
+| PATCH  | /api/relationships/:id/reject    | Yes  | Trainer                 |
+| PATCH  | /api/relationships/:id/terminate | Yes  | Client or Trainer       |
+| POST   | /api/ai-plans/:clientId/diet     | Yes  | Trainer                 |
+| POST   | /api/ai-plans/:clientId/workout  | Yes  | Trainer                 |
+| GET    | /api/ai-plans/mine               | Yes  | Client                  |
+| GET    | /api/ai-plans/:clientId          | Yes  | Client (own) / Trainer  |
+| DELETE | /api/ai-plans/:planId            | Yes  | Trainer (owner)         |
+
+## 12. Frontend Integration Checklist
+
+1. Store JWT after signup/login and attach in Authorization header.
+2. Build UI conditionally by role.
+3. For client coach-browse flow:
+   - GET /api/users?role=trainer — each trainer object includes `relationshipStatus: "none" | "pending" | "active" | "rejected" | "terminated"`
+   - Use `relationshipStatus` to enable/disable the "Send Request" button (disable when `pending` or `active`)
+   - POST /api/relationships/request to send a request
+   - GET /api/relationships/my-coach to display the active coach on the home screen
+4. For trainer client-management flow:
+   - GET /api/relationships/incoming — pending requests
+   - PATCH /api/relationships/:id/accept or /reject
+   - GET /api/relationships/my-clients — active clients list (replaces GET /api/users?role=client)
+5. For trainer assignment flow:
+   - Use client IDs from GET /api/relationships/my-clients
+   - POST /api/workouts/trainer
+   - POST /api/workouts/:id/assign
+6. For client video flow:
+   - POST /api/videos/upload (multipart with field name video, include exerciseName)
+   - GET /api/videos/mine
+   - GET /api/videos/:videoId/comments
+7. For trainer review flow:
+   - GET /api/videos/review
+   - GET /api/videos/:videoId
+   - POST /api/videos/:videoId/comments
+8. Use playbackUrl for in-app video player source.
+9. **Do not store relationship state in SharedPreferences** — always derive status from the relationship endpoints above.
+10. For trainer AI plan generation flow:
+    - Use client IDs from GET /api/relationships/my-clients
+    - POST /api/ai-plans/:clientId/diet — optionally include `coachNotes` for extra context
+    - POST /api/ai-plans/:clientId/workout — optionally include `coachNotes`
+    - GET /api/ai-plans/:clientId to browse all plans for a client
+    - DELETE /api/ai-plans/:planId to remove an outdated plan
+11. For client AI plan reading flow:
+    - GET /api/ai-plans/mine (optionally ?type=diet or ?type=workout)
+    - Render plan.content as markdown in the app
+
+## 13. Environment Variables
 
 ```env
-PORT=5000
-MONGODB_URI=<your_mongodb_atlas_url>
+PORT=8000
+MONGODB_URI=<mongodb_atlas_url>
 JWT_SECRET=<strong_secret>
 JWT_EXPIRES_IN=7d
 CORS_ORIGIN=*
 MAX_VIDEO_SIZE_MB=100
+GEMINI_API_KEY=<your_google_ai_studio_key>
 ```
 
-MongoDB Atlas URL goes specifically in `MONGODB_URI`.
+Notes:
+
+- If PORT is occupied (common on macOS with system services), set another port like 5055.
+- MongoDB Atlas connection URL must be placed in MONGODB_URI.

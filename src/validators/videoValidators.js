@@ -11,6 +11,11 @@ const uploadVideoValidator = [
     .isString()
     .isLength({ max: 1000 })
     .withMessage('description must be less than 1000 characters'),
+  body('exerciseName')
+    .optional({ nullable: true })
+    .isString()
+    .isLength({ max: 100 })
+    .withMessage('exerciseName must be a string with max 100 characters'),
   body('workoutId').optional().isMongoId().withMessage('workoutId must be a valid Mongo ID'),
   body('workoutAssignmentId')
     .optional()

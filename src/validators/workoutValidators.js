@@ -9,10 +9,10 @@ const createWorkoutValidator = [
   body('description').optional().isString().withMessage('description must be a string'),
   exerciseValidator,
   body('exercises.*.name').trim().notEmpty().withMessage('exercise name is required'),
-  body('exercises.*.sets').optional().isNumeric().withMessage('sets must be numeric'),
-  body('exercises.*.reps').optional().isNumeric().withMessage('reps must be numeric'),
-  body('exercises.*.durationSec').optional().isNumeric().withMessage('durationSec must be numeric'),
-  body('exercises.*.restSec').optional().isNumeric().withMessage('restSec must be numeric'),
+  body('exercises.*.sets').optional({ nullable: true }).isNumeric().withMessage('sets must be numeric'),
+  body('exercises.*.reps').optional({ nullable: true }).isNumeric().withMessage('reps must be numeric'),
+  body('exercises.*.durationSec').optional({ nullable: true }).isNumeric().withMessage('durationSec must be numeric'),
+  body('exercises.*.restSec').optional({ nullable: true }).isNumeric().withMessage('restSec must be numeric'),
   body('exercises.*.notes').optional().isString().withMessage('notes must be a string'),
 ];
 

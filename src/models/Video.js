@@ -47,6 +47,12 @@ const videoSchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
+    exerciseName: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: null,
+    },
     status: {
       type: String,
       enum: ['uploaded', 'reviewed'],

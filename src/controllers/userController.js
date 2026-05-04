@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
+const CoachClientRelationship = require('../models/CoachClientRelationship');
 
 const listUsersByRole = async (req, res, next) => {
   try {
@@ -9,6 +10,30 @@ const listUsersByRole = async (req, res, next) => {
     }
 
     const users = await User.find({ role }).select('name email role profile');
+
+    // When a client browses trainers, attach their relationship status for each coach
+    // so the frontend can correctly enable/disable the "Send Request" button.
+    if (role === 'trainer' && req.user.role === 'client') {
+      const trainerIds = users.map((u) => u._id);
+      const relationships = await CoachClientRelationship.find({
+        client: req.user._id,
+        coach: { $in: trainerIds },
+      }).select('coach status');
+
+      const statusByCoach = {};
+      for (const rel of relationships) {
+        // Most-recent relevant status wins; $in returns all, so just map
+        statusByCoach[rel.coach.toString()] = rel.status;
+      }
+
+      const usersWithStatus = users.map((u) => ({
+        ...u.toObject(),
+        relationshipStatus: statusByCoach[u._id.toString()] || 'none',
+      }));
+
+      return res.status(200).json({ users: usersWithStatus });
+    }
+
     res.status(200).json({ users });
   } catch (error) {
     next(error);

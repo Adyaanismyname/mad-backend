@@ -32,7 +32,7 @@ const uploadVideo = async (req, res, next) => {
       return res.status(400).json({ message: 'video file is required (field name: video)' });
     }
 
-    const { title, description, workoutId, workoutAssignmentId } = req.body;
+    const { title, description, workoutId, workoutAssignmentId, exerciseName } = req.body;
 
     if (workoutId) {
       const workout = await Workout.findById(workoutId).select('_id createdBy');
@@ -73,6 +73,7 @@ const uploadVideo = async (req, res, next) => {
       workoutAssignment: workoutAssignmentId || undefined,
       title: title || 'Workout Video',
       description,
+      exerciseName: exerciseName || null,
       fileName: req.file.filename,
       originalName: req.file.originalname,
       filePath: relativeFilePath,
