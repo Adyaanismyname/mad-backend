@@ -8,8 +8,8 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
  * Returns a Gemini model instance.
- * Default: gemini-1.5-flash (fast, cost-effective for structured text generation)
+ * Default: gemini-2.0-flash-lite (fast, higher free tier limits)
  */
-const getModel = (modelName = 'gemini-1.5-flash') => genAI.getGenerativeModel({ model: modelName });
+const getModel = (modelName = 'gemini-2.5-flash') => genAI.getGenerativeModel({ model: modelName });
 
 module.exports = { getModel };

@@ -10,6 +10,7 @@ const workoutRoutes = require('./routes/workoutRoutes');
 const videoRoutes = require('./routes/videoRoutes');
 const relationshipRoutes = require('./routes/relationshipRoutes');
 const aiPlanRoutes = require('./routes/aiPlanRoutes');
+const metricsRoutes = require('./routes/metricsRoutes');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -33,6 +34,7 @@ app.use('/api/workouts', workoutRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/relationships', relationshipRoutes);
 app.use('/api/ai-plans', aiPlanRoutes);
+app.use('/api/metrics', metricsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });

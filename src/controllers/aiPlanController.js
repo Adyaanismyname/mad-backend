@@ -30,72 +30,55 @@ const verifyTrainerClientAccess = async (trainerId, clientId) => {
 // ─────────────────────────────────────────────
 
 const buildDietPrompt = (client, coachNotes) => {
-  const { name, age, weight, bmi, bio } = client;
+  const { age, weight, bmi, bio } = client;
 
   const profileBlock = [
-    `- Name: ${name}`,
     age != null ? `- Age: ${age} years` : null,
     weight != null ? `- Weight: ${weight} kg` : null,
     bmi != null ? `- BMI: ${bmi}` : null,
-    bio ? `- Goals / Background: ${bio}` : null,
+    bio ? `- Goals/Background: ${bio}` : null,
     coachNotes ? `- Coach notes: ${coachNotes}` : null,
   ]
     .filter(Boolean)
     .join('\n');
 
-  return `You are an expert sports nutritionist and registered dietitian working with a personal trainer who manages clients via a fitness app.
-
-The trainer has provided the following client profile:
+  return `Generate a 7-day meal plan based on the following client stats:
 
 ${profileBlock}
 
-Your task is to create a detailed, personalized 7-day meal plan for this client. Follow these rules:
-
-1. Calculate an appropriate daily caloric target based on the client's stats and goals.
-2. Distribute macros sensibly (protein, carbs, fats) and state the daily macro targets in grams.
-3. Provide a full day-by-day plan: Breakfast, Mid-Morning Snack, Lunch, Afternoon Snack, Dinner, and (if needed) an Evening Snack.
-4. For each meal include: meal name, key ingredients, approximate calories, and a one-line preparation tip.
-5. Highlight any important nutritional notes (e.g. hydration, supplementation, foods to avoid).
-6. Use clear markdown formatting: use ## for day headings and ### for meal headings.
-7. Keep language practical and motivating — the trainer will share this directly with the client in the app.
-8. Do not add disclaimers about consulting a doctor unless a specific medical condition is mentioned.
-
-Begin the plan now.`;
+Rules:
+- State daily caloric target and macro breakdown (protein/carbs/fats in grams) upfront.
+- Each day: Breakfast, Morning Snack, Lunch, Afternoon Snack, Dinner. Add Evening Snack only if needed.
+- Per meal: name, key ingredients, approximate calories, one-line prep tip.
+- End with a short nutrition notes section (hydration, supplements, foods to avoid).
+- Use ## for day headings, ### for meal headings.
+- Be direct. No disclaimers. No filler text.`;
 };
 
 const buildWorkoutPrompt = (client, coachNotes) => {
-  const { name, age, weight, bmi, bio } = client;
+  const { age, weight, bmi, bio } = client;
 
   const profileBlock = [
-    `- Name: ${name}`,
     age != null ? `- Age: ${age} years` : null,
     weight != null ? `- Weight: ${weight} kg` : null,
     bmi != null ? `- BMI: ${bmi}` : null,
-    bio ? `- Goals / Background: ${bio}` : null,
+    bio ? `- Goals/Background: ${bio}` : null,
     coachNotes ? `- Coach notes: ${coachNotes}` : null,
   ]
     .filter(Boolean)
     .join('\n');
 
-  return `You are an expert certified personal trainer (CPT) and strength & conditioning coach working inside a fitness app called Fit & Fuel.
-
-The trainer has provided the following client profile:
+  return `Generate a 7-day workout plan based on the following client stats:
 
 ${profileBlock}
 
-Your task is to design a detailed, personalized weekly workout plan for this client. Follow these rules:
-
-1. Choose an appropriate training split (e.g. Push/Pull/Legs, Upper/Lower, Full Body) based on the client's goals and fitness level. Explain your choice briefly.
-2. Provide a 7-day schedule. Include rest days or active recovery where appropriate.
-3. For each training day:
-   - State the day's focus (e.g. "Day 1 — Chest & Triceps")
-   - List every exercise with: sets × reps (or time for cardio/holds), rest period, and a short coaching cue.
-4. Include a warm-up routine (5-10 min) and cool-down/stretch routine (5-10 min) for each training day.
-5. Add a progression note at the end explaining how the client should increase intensity week over week.
-6. Use clear markdown formatting: use ## for day headings and ### for section headings (Warm-Up, Main Workout, Cool-Down).
-7. Keep language practical and motivating — the trainer will share this directly with the client in the app.
-
-Begin the plan now.`;
+Rules:
+- Pick a training split suited to the goals (Push/Pull/Legs, Upper/Lower, or Full Body). State the choice and reason in one line.
+- 7-day schedule with rest or active recovery where appropriate.
+- Each training day: Warm-Up (5-10 min), Main Workout (exercises with sets×reps or duration, rest period, one coaching cue each), Cool-Down (5-10 min).
+- End with a one-paragraph weekly progression note.
+- Use ## for day headings (e.g. ## Day 1 — Push), ### for Warm-Up / Main Workout / Cool-Down.
+- Be direct. No disclaimers. No filler text.`;
 };
 
 // ─────────────────────────────────────────────
