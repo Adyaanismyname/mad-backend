@@ -17,6 +17,16 @@ const {
   trainerClientQueryValidator,
   addCommentValidator,
 } = require('../validators/videoValidators');
+const {
+  getAnnotations,
+  addStroke,
+  deleteStroke,
+  clearAnnotations,
+} = require('../controllers/annotationController');
+const {
+  addStrokeValidator,
+  strokeIdParamValidator,
+} = require('../validators/annotationValidators');
 
 const router = express.Router();
 
@@ -35,5 +45,11 @@ router.get('/:videoId', auth, videoIdParamValidator, getVideoById);
 router.get('/:videoId/comments', auth, videoIdParamValidator, getVideoComments);
 router.post('/:videoId/comments', auth, allowRoles('trainer'), addCommentValidator, addVideoComment);
 router.delete('/:videoId', auth, allowRoles('client'), videoIdParamValidator, deleteMyVideo);
+
+// Annotation routes
+router.get('/:videoId/annotations', auth, videoIdParamValidator, getAnnotations);
+router.post('/:videoId/annotations/strokes', auth, allowRoles('trainer'), addStrokeValidator, addStroke);
+router.delete('/:videoId/annotations/strokes/:strokeId', auth, allowRoles('trainer'), strokeIdParamValidator, deleteStroke);
+router.delete('/:videoId/annotations', auth, allowRoles('trainer'), videoIdParamValidator, clearAnnotations);
 
 module.exports = router;

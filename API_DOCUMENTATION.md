@@ -1,9 +1,9 @@
 # Fit & Fuel Backend API Documentation
 
-Last updated: 2026-05-03
+Last updated: 2026-05-05
 Audience: Frontend team (web/mobile)
 
-This document is implementation-accurate for the current Express backend, including auth, profile, workouts, local video upload, and trainer feedback.
+This document is implementation-accurate for the current Express backend, including auth, profile, workouts, local video upload, trainer feedback, and video annotations.
 
 ## 1. API Basics
 
@@ -54,39 +54,43 @@ Validation errors usually return:
 
 ## 2. Role-Based Access Matrix
 
-| Endpoint                               | Client         | Trainer                     |
-| -------------------------------------- | -------------- | --------------------------- |
-| POST /api/auth/signup                  | Yes            | Yes                         |
-| POST /api/auth/login                   | Yes            | Yes                         |
-| GET /api/auth/me                       | Yes            | Yes                         |
-| GET /api/users?role=client\|trainer    | Yes            | Yes                         |
-| PUT /api/users/profile                 | Yes            | Yes                         |
-| POST /api/workouts/client              | Yes            | No                          |
-| POST /api/workouts/trainer             | No             | Yes                         |
-| POST /api/workouts/:id/assign          | No             | Yes                         |
-| GET /api/workouts/mine                 | Yes            | Yes                         |
-| GET /api/workouts/assigned/me          | Yes            | No                          |
-| GET /api/workouts/assigned/by-me       | No             | Yes                         |
-| POST /api/videos/upload                | Yes            | No                          |
-| GET /api/videos/mine                   | Yes            | No                          |
-| GET /api/videos/review                 | No             | Yes                         |
-| GET /api/videos/:videoId               | Own video only | Assigned client videos only |
-| GET /api/videos/:videoId/comments      | Own video only | Assigned client videos only |
-| POST /api/videos/:videoId/comments     | No             | Assigned client videos only |
-| DELETE /api/videos/:videoId            | Own video only | No                          |
-| POST /api/relationships/request        | Yes            | No                          |
-| GET /api/relationships/my-requests     | Yes            | No                          |
-| GET /api/relationships/my-coach        | Yes            | No                          |
-| GET /api/relationships/incoming        | No             | Yes                         |
-| GET /api/relationships/my-clients      | No             | Yes                         |
-| PATCH /api/relationships/:id/accept    | No             | Yes                         |
-| PATCH /api/relationships/:id/reject    | No             | Yes                         |
-| PATCH /api/relationships/:id/terminate | Yes            | Yes                         |
-| POST /api/ai-plans/:clientId/diet      | No             | Yes                         |
-| POST /api/ai-plans/:clientId/workout   | No             | Yes                         |
-| GET /api/ai-plans/:clientId            | Yes (own only) | Yes (active clients only)   |
-| GET /api/ai-plans/mine                 | Yes            | No                          |
-| DELETE /api/ai-plans/:planId           | No             | Yes (own plans only)        |
+| Endpoint                                                  | Client         | Trainer                     |
+| --------------------------------------------------------- | -------------- | --------------------------- |
+| POST /api/auth/signup                                     | Yes            | Yes                         |
+| POST /api/auth/login                                      | Yes            | Yes                         |
+| GET /api/auth/me                                          | Yes            | Yes                         |
+| GET /api/users?role=client\|trainer                       | Yes            | Yes                         |
+| PUT /api/users/profile                                    | Yes            | Yes                         |
+| POST /api/workouts/client                                 | Yes            | No                          |
+| POST /api/workouts/trainer                                | No             | Yes                         |
+| POST /api/workouts/:id/assign                             | No             | Yes                         |
+| GET /api/workouts/mine                                    | Yes            | Yes                         |
+| GET /api/workouts/assigned/me                             | Yes            | No                          |
+| GET /api/workouts/assigned/by-me                          | No             | Yes                         |
+| POST /api/videos/upload                                   | Yes            | No                          |
+| GET /api/videos/mine                                      | Yes            | No                          |
+| GET /api/videos/review                                    | No             | Yes                         |
+| GET /api/videos/:videoId                                  | Own video only | Assigned client videos only |
+| GET /api/videos/:videoId/comments                         | Own video only | Assigned client videos only |
+| POST /api/videos/:videoId/comments                        | No             | Assigned client videos only |
+| DELETE /api/videos/:videoId                               | Own video only | No                          |
+| GET /api/videos/:videoId/annotations                      | Own video only | Assigned client videos only |
+| POST /api/videos/:videoId/annotations/strokes             | No             | Assigned client videos only |
+| DELETE /api/videos/:videoId/annotations/strokes/:strokeId | No             | Assigned client videos only |
+| DELETE /api/videos/:videoId/annotations                   | No             | Assigned client videos only |
+| POST /api/relationships/request                           | Yes            | No                          |
+| GET /api/relationships/my-requests                        | Yes            | No                          |
+| GET /api/relationships/my-coach                           | Yes            | No                          |
+| GET /api/relationships/incoming                           | No             | Yes                         |
+| GET /api/relationships/my-clients                         | No             | Yes                         |
+| PATCH /api/relationships/:id/accept                       | No             | Yes                         |
+| PATCH /api/relationships/:id/reject                       | No             | Yes                         |
+| PATCH /api/relationships/:id/terminate                    | Yes            | Yes                         |
+| POST /api/ai-plans/:clientId/diet                         | No             | Yes                         |
+| POST /api/ai-plans/:clientId/workout                      | No             | Yes                         |
+| GET /api/ai-plans/:clientId                               | Yes (own only) | Yes (active clients only)   |
+| GET /api/ai-plans/mine                                    | Yes            | No                          |
+| DELETE /api/ai-plans/:planId                              | No             | Yes (own plans only)        |
 
 ## 3. Domain Models
 
@@ -186,6 +190,44 @@ Validation errors usually return:
   "updatedAt": "ISO string"
 }
 ```
+
+## 3.6 VideoAnnotation
+
+One document per video. Strokes are **global** — they apply to the entire video regardless of the current playback position. All `x`/`y` coordinates are **normalized** (0.0–1.0 relative to the video canvas dimensions), making them resolution-independent.
+
+```json
+{
+  "_id": "string",
+  "video": "Video._id",
+  "trainer": "User._id",
+  "strokes": [
+    {
+      "strokeId": "uuid-string",
+      "type": "freehand | line | arrow | rect | circle | text",
+      "color": "#FF0000",
+      "strokeWidth": 2,
+      "points": [
+        { "x": 0.25, "y": 0.4 },
+        { "x": 0.3, "y": 0.45 }
+      ],
+      "label": "string | null"
+    }
+  ],
+  "createdAt": "ISO string",
+  "updatedAt": "ISO string"
+}
+```
+
+### Stroke field reference
+
+| Field         | Type           | Required                 | Notes                                                             |
+| ------------- | -------------- | ------------------------ | ----------------------------------------------------------------- |
+| `strokeId`    | string (UUID)  | server-generated         | Use this to target DELETE operations                              |
+| `type`        | enum           | No (default: `freehand`) | `freehand`, `line`, `arrow`, `rect`, `circle`, `text`             |
+| `color`       | hex string     | No (default: `#FF0000`)  | e.g. `#00FF00`, `#1A2B3CFF` (with alpha)                          |
+| `strokeWidth` | number 1–50    | No (default: `2`)        | Pixel width before normalization                                  |
+| `points`      | `{x,y}[]`      | No                       | Normalized 0–1 coords. For `text` use a single point for position |
+| `label`       | string \| null | No                       | Text content when `type` is `text`                                |
 
 ## 4. Health
 
@@ -870,6 +912,201 @@ Role required: client
 - 403 not owner
 - 404 video not found
 
+---
+
+## 8.1 Video Annotation Endpoints
+
+Annotations store a list of **global strokes** on a video. Global means they are not tied to a specific timestamp or frame — they appear overlaid on the entire video. Coordinates are normalized (0.0–1.0) relative to the video canvas, so the frontend should multiply by the actual render dimensions before drawing.
+
+There is one annotation document per video. It is created automatically on the first `POST .../strokes` call.
+
+### GET /api/videos/:videoId/annotations
+
+Fetch all strokes for a video.
+
+Auth required: Yes
+
+#### Access behavior
+
+- Client: own video only
+- Trainer: assigned client video only
+
+#### Success 200
+
+```json
+{
+  "strokes": [
+    {
+      "strokeId": "e3b0c442-98fc-1c14-9afb-f3c3d48a03b5",
+      "type": "freehand",
+      "color": "#FF0000",
+      "strokeWidth": 2,
+      "points": [
+        { "x": 0.1, "y": 0.25 },
+        { "x": 0.12, "y": 0.28 }
+      ],
+      "label": null
+    }
+  ]
+}
+```
+
+Returns `{ "strokes": [] }` if no annotations exist yet.
+
+#### Errors
+
+- 400 invalid videoId
+- 401 token missing/invalid
+- 403 not allowed
+- 404 video not found
+
+---
+
+### POST /api/videos/:videoId/annotations/strokes
+
+Add a single stroke to the video's annotation layer.
+
+Auth required: Yes
+Role required: trainer
+
+The server generates a unique `strokeId` (UUID v4) for each stroke. **Store the returned `strokeId`** to support undo / targeted deletion.
+
+#### Body
+
+```json
+{
+  "type": "freehand",
+  "color": "#FF0000",
+  "strokeWidth": 3,
+  "points": [
+    { "x": 0.1, "y": 0.25 },
+    { "x": 0.15, "y": 0.3 },
+    { "x": 0.2, "y": 0.28 }
+  ],
+  "label": null
+}
+```
+
+For a `text` stroke pass a single point (position) and set `label`:
+
+```json
+{
+  "type": "text",
+  "color": "#FFFF00",
+  "strokeWidth": 2,
+  "points": [{ "x": 0.5, "y": 0.2 }],
+  "label": "Keep knees aligned"
+}
+```
+
+For `rect` and `circle` pass two points (top-left + bottom-right / center + edge):
+
+```json
+{
+  "type": "rect",
+  "color": "#00FF00",
+  "strokeWidth": 2,
+  "points": [
+    { "x": 0.3, "y": 0.4 },
+    { "x": 0.6, "y": 0.7 }
+  ]
+}
+```
+
+#### Validation
+
+| Field         | Rule                                                                   |
+| ------------- | ---------------------------------------------------------------------- |
+| `type`        | optional; one of `freehand`, `line`, `arrow`, `rect`, `circle`, `text` |
+| `color`       | optional; valid hex string `#RGB`, `#RRGGBB`, or `#RRGGBBAA`           |
+| `strokeWidth` | optional; number 1–50                                                  |
+| `points`      | optional; array of `{x, y}` each 0.0–1.0                               |
+| `label`       | optional; string max 500 chars                                         |
+
+#### Success 201
+
+```json
+{
+  "message": "Stroke added successfully",
+  "stroke": {
+    "strokeId": "e3b0c442-98fc-1c14-9afb-f3c3d48a03b5",
+    "type": "freehand",
+    "color": "#FF0000",
+    "strokeWidth": 3,
+    "points": [{ "x": 0.1, "y": 0.25 }],
+    "label": null
+  },
+  "strokes": [
+    /* full updated strokes array */
+  ]
+}
+```
+
+#### Errors
+
+- 400 validation failure or invalid videoId
+- 401 token missing/invalid
+- 403 not a trainer or client not assigned to you
+- 404 video not found
+
+---
+
+### DELETE /api/videos/:videoId/annotations/strokes/:strokeId
+
+Remove a specific stroke by its `strokeId`.
+
+Auth required: Yes
+Role required: trainer
+
+#### Path params
+
+- `videoId`: Mongo ObjectId
+- `strokeId`: UUID string returned by the POST endpoint
+
+#### Success 200
+
+```json
+{
+  "message": "Stroke deleted successfully",
+  "strokes": [
+    /* remaining strokes */
+  ]
+}
+```
+
+#### Errors
+
+- 400 invalid videoId
+- 401 token missing/invalid
+- 403 client not assigned to you
+- 404 video not found or no annotations exist
+
+---
+
+### DELETE /api/videos/:videoId/annotations
+
+Clear all strokes for a video (reset canvas).
+
+Auth required: Yes
+Role required: trainer
+
+#### Success 200
+
+```json
+{
+  "message": "All annotations cleared"
+}
+```
+
+#### Errors
+
+- 400 invalid videoId
+- 401 token missing/invalid
+- 403 client not assigned to you
+- 404 video not found
+
+---
+
 ## 9. Static Video Playback
 
 Video URLs returned as playbackUrl are publicly served through:
@@ -1331,6 +1568,13 @@ Role required: trainer
 11. For client AI plan reading flow:
     - GET /api/ai-plans/mine (optionally ?type=diet or ?type=workout)
     - Render plan.content as markdown in the app
+12. For trainer annotation flow:
+    - GET /api/videos/:videoId/annotations — load existing strokes on canvas open
+    - POST /api/videos/:videoId/annotations/strokes — persist each stroke the trainer draws; store the returned `strokeId` locally to support undo/delete
+    - DELETE /api/videos/:videoId/annotations/strokes/:strokeId — remove a specific stroke (undo/erase)
+    - DELETE /api/videos/:videoId/annotations — clear the entire canvas
+13. For client annotation viewing flow:
+    - GET /api/videos/:videoId/annotations — fetch strokes and render them on the video canvas; all strokes are global (visible on every frame)
 
 ## 13. Environment Variables
 
