@@ -2,7 +2,7 @@ const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const AIPlan = require('../models/AIPlan');
 const CoachClientRelationship = require('../models/CoachClientRelationship');
-const { getModel } = require('../config/gemini');
+const { generateWithFallback } = require('../config/gemini');
 
 const ensureValidation = (req, res) => {
   const errors = validationResult(req);
@@ -117,9 +117,7 @@ const generateDietPlan = async (req, res, next) => {
     };
 
     const prompt = buildDietPrompt(clientData, coachNotes);
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const content = result.response.text();
+    const content = await generateWithFallback(prompt);
 
     const plan = await AIPlan.create({
       client: clientId,
@@ -171,9 +169,7 @@ const generateWorkoutPlan = async (req, res, next) => {
     };
 
     const prompt = buildWorkoutPrompt(clientData, coachNotes);
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const content = result.response.text();
+    const content = await generateWithFallback(prompt);
 
     const plan = await AIPlan.create({
       client: clientId,
